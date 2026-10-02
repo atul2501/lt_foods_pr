@@ -1,0 +1,13 @@
+__pycache__/
+*.pyc
+.venv/
+venv/
+.ruff_cache/
+*.egg-info/
+.DS_Store
+**/.DS_Store
+
+data/
+logs/
+.run/
+.env

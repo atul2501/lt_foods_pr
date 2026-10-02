@@ -1,0 +1,19 @@
+[Unit]
+Description=LT Foods Invoice Extraction Email Ingest (IMAP mailbox watcher)
+After=network.target
+
+[Service]
+Type=simple
+User=invoice-service
+Group=invoice-service
+WorkingDirectory=/opt/invoice-service
+EnvironmentFile=/opt/invoice-service/.env
+ExecStart=/opt/invoice-service/.venv/bin/python email_ingest_main.py
+Restart=on-failure
+RestartSec=5
+# A cycle extracts PDFs inline and can take minutes, so SIGTERM may kill one mid-PDF -
+# safe: an email is only marked read once all its PDFs have a result, so it is retried.
+TimeoutStopSec=60
+
+[Install]
+WantedBy=multi-user.target

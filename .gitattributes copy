@@ -1,0 +1,5 @@
+# Auto detect text files and perform LF normalization
+* text=auto
+# Shell scripts must stay LF even on Windows checkouts (core.autocrlf=true) - bash can't
+# parse CRLF ("$'\r': command not found").
+*.sh text eol=lf

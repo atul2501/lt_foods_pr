@@ -1,0 +1,124 @@
+{
+  "id": "3f8c2a1e-6c1b-4f0a-9c6b-0d2e4a7b9f11",
+  "status": "success",
+  "api_version": "1",
+  "filename": "Brookshaw_15915.pdf",
+  "pdf_url": "/files/3f8c2a1e-6c1b-4f0a-9c6b-0d2e4a7b9f11.pdf",
+  "error": null,
+  "page_count": 1,
+  "document_count_estimate": 1,
+  "invoice_header": {
+    "invoice_number": "15915",
+    "invoice_date": "2026-09-18",
+    "due_date": "2026-10-18",
+    "payment_terms": "30 days from invoice date",
+    "company_code": "LT Foods Europe Ltd",
+    "vendor_name": "Brookshaw Stuart Ltd",
+    "vendor_address": "Unit 4, Riverside Business Park, Rochdale, OL11 2PX, United Kingdom",
+    "vendor_tax_id": "GB123456789",
+    "vendor_country": "GB",
+    "vendor_bank_name": "Barclays",
+    "vendor_account_no": "12345678",
+    "vendor_sort_code": "20-00-00",
+    "vendor_iban": null,
+    "customer_name": "LT Foods Europe Ltd",
+    "customer_address": "Harrow, Middlesex, United Kingdom",
+    "po_number": "6600128207",
+    "reference_number": "DN 44821",
+    "currency": "GBP",
+    "subtotal": 1362.7,
+    "tax_amount": 272.54,
+    "tax_percent": 20,
+    "total_amount": 1635.24,
+    "document_type": "INVOICE",
+    "document_direction": "VENDOR_TO_CUSTOMER",
+    "invoice_period_from": null,
+    "invoice_period_to": null
+  },
+  "line_items": [
+    {
+      "line_no": "1",
+      "description": "Pallet wrap 500mm x 300m clear",
+      "quantity": 40,
+      "unit": "ROL",
+      "unit_price": 21.5,
+      "amount": 860.0,
+      "tax_percent": 20,
+      "tax_amount": 172.0,
+      "reference_code": "PW500",
+      "po_number": "6600128207",
+      "po_item": "10",
+      "gl_account": null,
+      "cost_center": null,
+      "profit_center": null
+    },
+    {
+      "line_no": "2",
+      "description": "Strapping tape 12mm x 66m",
+      "quantity": 120,
+      "unit": "ROL",
+      "unit_price": 4.189,
+      "amount": 502.7,
+      "tax_percent": 20,
+      "tax_amount": 100.54,
+      "reference_code": "ST12",
+      "po_number": "6600128207",
+      "po_item": "20",
+      "gl_account": null,
+      "cost_center": null,
+      "profit_center": null
+    }
+  ],
+  "additional_fields": [
+    {
+      "field_name": "Delivery Note",
+      "field_value": "DN 44821"
+    },
+    {
+      "field_name": "Customer Account",
+      "field_value": "LTF001"
+    },
+    {
+      "field_name": "Vehicle Reg",
+      "field_value": "MX21 ABC"
+    }
+  ],
+  "tax_details": [
+    {
+      "tax_type": "VAT",
+      "tax_rate": 20,
+      "tax_amount": 272.54,
+      "taxable_amount": 1362.7
+    }
+  ],
+  "purchase_order_items": [
+    {
+      "po_number": "6600128207",
+      "po_item": "10",
+      "invoice_line_no": "1",
+      "quantity": 40,
+      "unit_price": 21.5,
+      "amount": 860.0
+    },
+    {
+      "po_number": "6600128207",
+      "po_item": "20",
+      "invoice_line_no": "2",
+      "quantity": 120,
+      "unit_price": 4.189,
+      "amount": 502.7
+    }
+  ],
+  "confidence": {
+    "invoice_number": 0.99,
+    "invoice_date": 0.98,
+    "vendor_name": 0.97,
+    "vendor_tax_id": 0.95,
+    "po_number": 0.99,
+    "total_amount": 0.99,
+    "subtotal": 0.97,
+    "tax_amount": 0.97,
+    "currency": 1.0,
+    "document_type": 0.99
+  }
+}

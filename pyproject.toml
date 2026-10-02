@@ -1,0 +1,4 @@
+[tool.ruff.lint]
+# Dead-code signals only (unused imports/vars, redefinition, undefined names) - not a
+# full style ruleset, so this doesn't force an unrelated repo-wide style migration.
+select = ["F401", "F811", "F841", "F821", "F823"]

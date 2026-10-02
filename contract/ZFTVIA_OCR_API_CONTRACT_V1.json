@@ -1,0 +1,435 @@
+{
+  "contract": "ZFTVIA OCR Invoice API – final JSON contract for SAP Vendor Invoice Automation",
+  "api_version": "1",
+  "owner": "SAP ABAP team (ZFTVIA framework) / OCR application team",
+  "last_updated": "2026-10-02",
+  "_comment_transport": "Section 1 – HTTP transport. SAP calls the OCR API; the OCR application may also push finished PDFs to SAP (section 4).",
+  "transport": {
+    "base_url_dev": "http://172.16.10.36:8001",
+    "base_url_prd": "https://<ocr-host>  (TLS mandatory in PRD, certificate imported in STRUST)",
+    "authentication": {
+      "type": "HTTP Basic",
+      "header": "Authorization: Basic base64(username:password)",
+      "note": "SAP stores the user name in table ZFTVIA_APICFG and the password AES-encrypted. Until Basic auth is live on the OCR side SAP can send an API key instead: header X-API-Key (AUTH_TYPE = APIKEY). Please keep ONE user per SAP system (DEV/QAS/PRD)."
+    },
+    "endpoints": [
+      {
+        "name": "submit",
+        "method": "POST",
+        "path": "/api/v1/invoices",
+        "request_headers": {
+          "Content-Type": "application/pdf",
+          "X-Filename": "<original file name>",
+          "X-SAP-Reference": "<ZFTVIA id, e.g. VIA-2026-000000012>"
+        },
+        "request_body": "raw PDF bytes (no multipart)",
+        "response_code": 202,
+        "response_body": {
+          "id": "string (uuid)",
+          "status": "processing",
+          "result_url": "/api/v1/invoices/{id}",
+          "pdf_url": "/files/{id}.pdf"
+        }
+      },
+      {
+        "name": "result",
+        "method": "GET",
+        "path": "/api/v1/invoices/{id}",
+        "response_code_processing": "202 with body {\"id\":..,\"status\":\"processing\"}",
+        "response_code_done": "200 with the full document below (status success | needs_review | error)",
+        "response_code_unknown_id": 404,
+        "polling_by_sap": "every POLL_INTERVAL_SEC (default 3 s), at most POLL_MAX (default 40) attempts per run, retried by the SAP retry job afterwards"
+      }
+    ],
+    "limits": {
+      "max_pdf_size_mb": 25,
+      "max_pages": 50,
+      "timeout_sec_sap_side": 60
+    }
+  },
+  "_comment_rules": "Section 2 – data rules valid for every field.",
+  "rules": {
+    "encoding": "UTF-8 JSON, keys exactly as in the sample (snake_case, lower case)",
+    "missing_values": "Field not recognised on the document → JSON null. Never omit a mandatory key, never send empty string \"\" or \"N/A\" / \"-\" / \"NULL\" as text.",
+    "dates": "ISO 8601 YYYY-MM-DD as printed on the document (SAP converts). If only month/year is readable send null and add it to additional_fields.",
+    "amounts": "JSON number with '.' as decimal separator, no thousands separator, no currency symbol (e.g. 1635.24, 36558.51). Negative amounts are NOT used – use document_type CREDIT_NOTE / document_direction instead.",
+    "quantities": "JSON number (may be fractional, e.g. 0.5)",
+    "percentages": "JSON number, 20 means 20 %",
+    "currency": "ISO 4217 code, 3 upper-case letters (GBP, EUR, INR, USD). Convert symbols: £→GBP, €→EUR, ₹→INR, $→USD unless the document states another currency.",
+    "vendor_country": "ISO 3166-1 alpha-2 (GB, PL, IN, DE); derive from address or VAT-id prefix when not printed",
+    "document_type": "one of INVOICE | CREDIT_NOTE | DEBIT_NOTE | DELIVERY_NOTE | TIMESHEET | PROFORMA | STATEMENT | OTHER (upper case). Mandatory – SAP rejects the file otherwise. DELIVERY_NOTE / TIMESHEET are routed to NON_POSTABLE in SAP, so please classify packing lists, delivery notes and timesheets explicitly instead of OTHER.",
+    "document_direction": "VENDOR_TO_CUSTOMER (we pay) | CUSTOMER_TO_VENDOR (we issue) – helps to filter outgoing documents scanned by mistake",
+    "line_items": "one entry per physical line on the invoice in printed order. amount = net line value (before tax). Freight / packing / discount lines are ordinary lines with a telling description.",
+    "additional_fields": "every labelled value on the document that has no header field (Customer Order No, BL No, Container No, Vessel, Delivery Note, GRN, Vehicle Reg, HSN code, IRN, …). field_name = label as printed, field_value = value as printed. SAP matches names case-insensitively and configures the use per company.",
+    "tax_details": "one entry per tax type/rate (VAT 20, CGST 9 + SGST 9, IGST 18, reverse charge 0). Mandatory for India; recommended elsewhere.",
+    "purchase_order_items": "only when the document prints PO number + PO item per line (or a PO/line table). Otherwise an empty array [].",
+    "confidence": "0.0 – 1.0 per header field (1.0 = certain). SAP routes a document to manual review when any mandatory field is below the configured threshold (default 0.80) or status = needs_review.",
+    "multi_invoice_pdf": "if one PDF contains several invoices (e.g. Arohan I2502786 – 3 invoices) return the FIRST invoice in this document, set document_count_estimate = 3 and add additional_fields {\"field_name\":\"Additional invoices in file\",\"field_value\":\"I2502787;I2502788\"}. A split into separate PDFs by the OCR application is preferred.",
+    "page_count": "pages of the PDF processed",
+    "gl_account_cost_center_profit_center": "always null – SAP determines account assignment itself (fields kept only for backward compatibility)",
+    "vendor_bank_data": "may be filled but SAP never updates vendor master from it; used only for an informational compare in the worklist",
+    "error_status": "status = error must come with \"error\": \"<text>\" and may leave invoice_header / line_items null"
+  },
+  "_comment_mandatory": "Section 3 – field classification. M = mandatory (key must exist; value may be null only when it is truly not on the document, SAP then routes to review), S = should have, O = optional.",
+  "field_classification": {
+    "root": {
+      "id": "M",
+      "status": "M",
+      "api_version": "M",
+      "filename": "S",
+      "pdf_url": "O",
+      "error": "O (M when status = error)",
+      "page_count": "S",
+      "document_count_estimate": "S"
+    },
+    "invoice_header": {
+      "invoice_number": "M",
+      "invoice_date": "M",
+      "due_date": "S",
+      "payment_terms": "O",
+      "company_code": "S (text printed as 'bill to' legal entity; SAP maps it)",
+      "vendor_name": "M",
+      "vendor_address": "S",
+      "vendor_tax_id": "M (VAT / GSTIN / NIP)",
+      "vendor_country": "S",
+      "vendor_bank_name": "O",
+      "vendor_account_no": "O",
+      "vendor_sort_code": "O",
+      "vendor_iban": "O",
+      "customer_name": "S",
+      "customer_address": "O",
+      "po_number": "M (null if none printed)",
+      "reference_number": "O",
+      "currency": "M",
+      "subtotal": "M",
+      "tax_amount": "M",
+      "tax_percent": "S",
+      "total_amount": "M",
+      "document_type": "M",
+      "document_direction": "S",
+      "invoice_period_from": "O",
+      "invoice_period_to": "O"
+    },
+    "line_items[]": {
+      "line_no": "M",
+      "description": "M",
+      "quantity": "M",
+      "unit": "S",
+      "unit_price": "M",
+      "amount": "M",
+      "tax_percent": "S",
+      "tax_amount": "S",
+      "reference_code": "O (article / part / HSN code)",
+      "po_number": "O",
+      "po_item": "O",
+      "gl_account": "null",
+      "cost_center": "null",
+      "profit_center": "null"
+    },
+    "additional_fields[]": {
+      "field_name": "M",
+      "field_value": "M"
+    },
+    "tax_details[]": {
+      "tax_type": "M",
+      "tax_rate": "M",
+      "tax_amount": "M",
+      "taxable_amount": "S"
+    },
+    "purchase_order_items[]": {
+      "po_number": "M",
+      "po_item": "S",
+      "invoice_line_no": "M",
+      "quantity": "O",
+      "unit_price": "O",
+      "amount": "O"
+    },
+    "confidence": {
+      "invoice_number": "M",
+      "invoice_date": "M",
+      "vendor_name": "M",
+      "vendor_tax_id": "S",
+      "po_number": "M",
+      "total_amount": "M",
+      "subtotal": "S",
+      "tax_amount": "S",
+      "currency": "S",
+      "document_type": "M"
+    }
+  },
+  "_comment_sample": "Section 4 – complete sample response of GET /api/v1/invoices/{id} (Brookshaw Stuart invoice 15915 against PO 6600128207, GBP, VAT 20 %).",
+  "sample_response": {
+    "id": "3f8c2a1e-6c1b-4f0a-9c6b-0d2e4a7b9f11",
+    "status": "success",
+    "api_version": "1",
+    "filename": "Brookshaw_15915.pdf",
+    "pdf_url": "/files/3f8c2a1e-6c1b-4f0a-9c6b-0d2e4a7b9f11.pdf",
+    "error": null,
+    "page_count": 1,
+    "document_count_estimate": 1,
+    "invoice_header": {
+      "invoice_number": "15915",
+      "invoice_date": "2026-09-18",
+      "due_date": "2026-10-18",
+      "payment_terms": "30 days from invoice date",
+      "company_code": "LT Foods Europe Ltd",
+      "vendor_name": "Brookshaw Stuart Ltd",
+      "vendor_address": "Unit 4, Riverside Business Park, Rochdale, OL11 2PX, United Kingdom",
+      "vendor_tax_id": "GB123456789",
+      "vendor_country": "GB",
+      "vendor_bank_name": "Barclays",
+      "vendor_account_no": "12345678",
+      "vendor_sort_code": "20-00-00",
+      "vendor_iban": null,
+      "customer_name": "LT Foods Europe Ltd",
+      "customer_address": "Harrow, Middlesex, United Kingdom",
+      "po_number": "6600128207",
+      "reference_number": "DN 44821",
+      "currency": "GBP",
+      "subtotal": 1362.7,
+      "tax_amount": 272.54,
+      "tax_percent": 20,
+      "total_amount": 1635.24,
+      "document_type": "INVOICE",
+      "document_direction": "VENDOR_TO_CUSTOMER",
+      "invoice_period_from": null,
+      "invoice_period_to": null
+    },
+    "line_items": [
+      {
+        "line_no": "1",
+        "description": "Pallet wrap 500mm x 300m clear",
+        "quantity": 40,
+        "unit": "ROL",
+        "unit_price": 21.5,
+        "amount": 860.0,
+        "tax_percent": 20,
+        "tax_amount": 172.0,
+        "reference_code": "PW500",
+        "po_number": "6600128207",
+        "po_item": "10",
+        "gl_account": null,
+        "cost_center": null,
+        "profit_center": null
+      },
+      {
+        "line_no": "2",
+        "description": "Strapping tape 12mm x 66m",
+        "quantity": 120,
+        "unit": "ROL",
+        "unit_price": 4.189,
+        "amount": 502.7,
+        "tax_percent": 20,
+        "tax_amount": 100.54,
+        "reference_code": "ST12",
+        "po_number": "6600128207",
+        "po_item": "20",
+        "gl_account": null,
+        "cost_center": null,
+        "profit_center": null
+      }
+    ],
+    "additional_fields": [
+      {
+        "field_name": "Delivery Note",
+        "field_value": "DN 44821"
+      },
+      {
+        "field_name": "Customer Account",
+        "field_value": "LTF001"
+      },
+      {
+        "field_name": "Vehicle Reg",
+        "field_value": "MX21 ABC"
+      }
+    ],
+    "tax_details": [
+      {
+        "tax_type": "VAT",
+        "tax_rate": 20,
+        "tax_amount": 272.54,
+        "taxable_amount": 1362.7
+      }
+    ],
+    "purchase_order_items": [
+      {
+        "po_number": "6600128207",
+        "po_item": "10",
+        "invoice_line_no": "1",
+        "quantity": 40,
+        "unit_price": 21.5,
+        "amount": 860.0
+      },
+      {
+        "po_number": "6600128207",
+        "po_item": "20",
+        "invoice_line_no": "2",
+        "quantity": 120,
+        "unit_price": 4.189,
+        "amount": 502.7
+      }
+    ],
+    "confidence": {
+      "invoice_number": 0.99,
+      "invoice_date": 0.98,
+      "vendor_name": 0.97,
+      "vendor_tax_id": 0.95,
+      "po_number": 0.99,
+      "total_amount": 0.99,
+      "subtotal": 0.97,
+      "tax_amount": 0.97,
+      "currency": 1.0,
+      "document_type": 0.99
+    }
+  },
+  "_comment_samples_other": "Section 5 – shortened samples for the other invoice kinds in the test pack.",
+  "sample_bl_miro_header": {
+    "invoice_number": "7E2/14600141",
+    "invoice_date": "2026-09-22",
+    "vendor_name": "ALUPOL PACKAGING S.A.",
+    "vendor_tax_id": "PL6262900000",
+    "vendor_country": "PL",
+    "po_number": "6400045032",
+    "currency": "EUR",
+    "subtotal": 36558.51,
+    "tax_amount": 0,
+    "tax_percent": 0,
+    "total_amount": 36558.51,
+    "document_type": "INVOICE",
+    "document_direction": "VENDOR_TO_CUSTOMER",
+    "additional_fields_expected": [
+      {
+        "field_name": "Customer Order No",
+        "field_value": "6400045032; 6400045094"
+      },
+      {
+        "field_name": "BL No",
+        "field_value": "MEDUKR123456"
+      },
+      {
+        "field_name": "Container No",
+        "field_value": "MSCU1234567"
+      },
+      {
+        "field_name": "Vessel",
+        "field_value": "MSC ANNA"
+      },
+      {
+        "field_name": "Incoterms",
+        "field_value": "CIF Felixstowe"
+      }
+    ],
+    "tax_details_expected": [
+      {
+        "tax_type": "VAT",
+        "tax_rate": 0,
+        "tax_amount": 0,
+        "taxable_amount": 36558.51
+      }
+    ]
+  },
+  "sample_fb60_freight_header": {
+    "invoice_number": "4300137319",
+    "invoice_date": "2026-09-25",
+    "vendor_name": "CHEP UK Ltd",
+    "vendor_tax_id": "GB567890123",
+    "vendor_country": "GB",
+    "po_number": "6600169114",
+    "currency": "GBP",
+    "subtotal": 1250.0,
+    "tax_amount": 250.0,
+    "tax_percent": 20,
+    "total_amount": 1500.0,
+    "document_type": "INVOICE",
+    "line_items_note": "freight / pallet hire lines – SAP classifies to FB60 by rule (vendor type FREIGHT or description pattern) even when a PO number is printed",
+    "additional_fields_expected": [
+      {
+        "field_name": "Account No",
+        "field_value": "CHP-99812"
+      },
+      {
+        "field_name": "Period",
+        "field_value": "01/09/2026 - 30/09/2026"
+      }
+    ]
+  },
+  "sample_india_gst_header": {
+    "invoice_number": "I2502786",
+    "invoice_date": "2026-09-15",
+    "vendor_name": "Arohan Logistics Pvt Ltd",
+    "vendor_tax_id": "07AAACA1234A1Z5",
+    "vendor_country": "IN",
+    "po_number": null,
+    "currency": "INR",
+    "subtotal": 21731.0,
+    "tax_amount": 3911.58,
+    "tax_percent": 18,
+    "total_amount": 25642.58,
+    "document_type": "INVOICE",
+    "document_count_estimate": 3,
+    "tax_details_expected": [
+      {
+        "tax_type": "CGST",
+        "tax_rate": 9,
+        "tax_amount": 1955.79,
+        "taxable_amount": 21731.0
+      },
+      {
+        "tax_type": "SGST",
+        "tax_rate": 9,
+        "tax_amount": 1955.79,
+        "taxable_amount": 21731.0
+      }
+    ],
+    "additional_fields_expected": [
+      {
+        "field_name": "IRN",
+        "field_value": "<64 char IRN>"
+      },
+      {
+        "field_name": "HSN/SAC",
+        "field_value": "996511"
+      },
+      {
+        "field_name": "Additional invoices in file",
+        "field_value": "I2502787;I2502788"
+      }
+    ]
+  },
+  "sample_error_response": {
+    "id": "9b1d…",
+    "status": "error",
+    "api_version": "1",
+    "filename": "scan001.pdf",
+    "error": "No text layer and OCR confidence below threshold",
+    "page_count": 2,
+    "document_count_estimate": 0,
+    "invoice_header": null,
+    "line_items": [],
+    "additional_fields": [],
+    "tax_details": [],
+    "purchase_order_items": [],
+    "confidence": null
+  },
+  "_comment_push": "Section 6 – optional push from the OCR application into SAP (instead of SAP polling a mailbox). RFC-enabled function module, called via SAP RFC/JCo/NCo or SAP Gateway OData wrapper if preferred.",
+  "sap_push_interface": {
+    "function_module": "ZFTVIA_PROCESS_DOCUMENT",
+    "protocol": "RFC (SAP .NET Connector / JCo / PyRFC) – user of type SYSTEM with role ZFTVIA_RFC",
+    "importing": {
+      "IV_FILE_NAME": "STRING – original file name, e.g. Brookshaw_15915.pdf",
+      "IV_MIME_TYPE": "STRING – application/pdf",
+      "IV_CONTENT": "XSTRING – PDF bytes",
+      "IV_SOURCE_REF": "STRING – unique reference of the source (mail message id / OCR job id) – used for duplicate detection",
+      "IV_SOURCE_TYPE": "CHAR12 – EMAIL | API | MANUAL",
+      "IV_BUKRS": "CHAR4 – company code hint, optional",
+      "IV_RUN_NOW": "CHAR1 – 'X' = run OCR + validation synchronously, ' ' = queue for the SAP jobs"
+    },
+    "exporting": {
+      "EV_VIA_ID": "CHAR20 – SAP document id VIA-YYYY-NNNNNNNNN (returned also for a duplicate)",
+      "EV_STATUS": "CHAR25 – INVOICE_RECEIVED | DUPLICATE | VALIDATION_PENDING | …",
+      "EV_MESSAGE": "STRING",
+      "ET_RETURN": "BAPIRET2 table"
+    },
+    "status_query": "ZFTVIA_GET_STATUS (IV_VIA_ID) → ES_HEADER, ET_ITEMS, ET_EXCEPTIONS, ET_STATUS_HISTORY"
+  }
+}
