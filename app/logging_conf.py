@@ -1,6 +1,7 @@
 import logging
 import os
 import sys
+import threading
 import time
 from contextlib import contextmanager
 from datetime import date
@@ -170,6 +171,38 @@ def configure_logging() -> None:
         file_handler = DailyFileHandler(resolve_log_path(settings.log_file), settings.log_retention_days)
         file_handler.setFormatter(formatter)
         root_logger.addHandler(file_handler)
+
+    _route_other_output_to_root()
+
+
+def _route_other_output_to_root() -> None:
+    """Everything else a service prints - uvicorn's startup/shutdown/error messages, Python
+    warnings, uncaught exceptions - otherwise bypasses these handlers and only reaches stderr
+    (logs/run.log under run.sh). Sends it through the root logger so it lands in app.log too.
+    uvicorn.access is left alone: the http_request middleware event already covers it."""
+    for name in ("uvicorn", "uvicorn.error"):
+        uv_logger = logging.getLogger(name)
+        uv_logger.handlers.clear()
+        uv_logger.propagate = True
+
+    logging.captureWarnings(True)
+
+    crash_logger = structlog.get_logger("uncaught")
+
+    # Still printed to stderr as well, so run.log keeps its crash tracebacks.
+    def log_uncaught(exc_type, exc, tb):
+        if not issubclass(exc_type, KeyboardInterrupt):
+            crash_logger.critical("uncaught_exception", exc_info=(exc_type, exc, tb))
+        sys.__excepthook__(exc_type, exc, tb)
+
+    def log_uncaught_in_thread(args):
+        if args.exc_type is not SystemExit:
+            crash_logger.critical("uncaught_thread_exception", thread=getattr(args.thread, "name", None),
+                                  exc_info=(args.exc_type, args.exc_value, args.exc_traceback))
+        threading.__excepthook__(args)
+
+    sys.excepthook = log_uncaught
+    threading.excepthook = log_uncaught_in_thread
 
 
 def get_logger(name: str = "invoice_service"):

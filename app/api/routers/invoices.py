@@ -208,4 +208,4 @@ def _run_upload_job(job_id: str, content: bytes, filename: str | None, sap_refer
     results_store.finish_job(job_id, data)
     if response.status.value != "error":
         results_store.register_hash(content, job_id)
-    logger.info("upload_result", result_id=job_id, status=data["status"])
+    logger.info("upload_result", result_id=job_id, status=data["status"], result=data)
