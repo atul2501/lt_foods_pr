@@ -78,6 +78,17 @@ def test_result_matches_sap_contract():
     assert data["status"] in ("success", "needs_review")
 
 
+def test_missing_invoice_date_is_null_not_error():
+    llm_output = json.loads(json.dumps(LLM_OUTPUT))
+    llm_output["invoice_header"]["invoice_date"] = ""
+    extraction = InvoiceExtraction.model_validate(llm_output)
+    result = build_result("job-1", _pipeline_result(extraction), "Brookshaw_15915.pdf", None)
+    data = result.model_dump(mode="json")
+    jsonschema.Draft202012Validator(SCHEMA).validate(data)
+    assert data["invoice_header"]["invoice_date"] is None
+    assert data["status"] == "needs_review"
+
+
 def test_failure_matches_sap_contract():
     data = build_failure("job-2", "NoUsableTextError: no text", "scan.pdf", None, page_count=2).model_dump(mode="json")
     jsonschema.Draft202012Validator(SCHEMA).validate(data)

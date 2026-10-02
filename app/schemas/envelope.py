@@ -45,6 +45,7 @@ OutputDate = Annotated[
 # gl_account / cost_center / profit_center are always null (SAP determines them) but the keys
 # stay in the JSON because the contract requires them.
 class InvoiceHeaderOut(InvoiceHeader):
+    invoice_date: Optional[str] = None      # null when not printed / unreadable (contract allows it)
     vendor_tax_id: Optional[str] = None     # may be missing on old stored results
     document_type: str = "INVOICE"
 
