@@ -27,6 +27,17 @@ MAIN_PID_FILE="$RUN_DIR/main.pid"
 RUN_ID_FILE="$RUN_DIR/run.id"
 STOP_FLAG="$RUN_DIR/stopping"
 SERVICES=(api email)
+# EMAIL_ENABLED=false (in .env, or as an env var which wins) starts only the API - the email
+# poller is skipped. stop/status still cover every service, so a poller left running from an
+# earlier start is still stopped.
+EMAIL_ENABLED="${EMAIL_ENABLED:-$(grep -E '^[[:space:]]*EMAIL_ENABLED=' .env 2>/dev/null | tail -n1 | cut -d= -f2- | tr -d "\"' \r")}"
+EMAIL_ENABLED="$(echo "${EMAIL_ENABLED:-true}" | tr -d "\"' 
+" | tr '[:upper:]' '[:lower:]')"
+START_SERVICES=(api)
+case "$EMAIL_ENABLED" in
+  false|0|no|off) ;;
+  *) START_SERVICES+=(email) ;;
+esac
 # A service that stayed up at least this long is considered healthy again, so its restart
 # delay resets to the minimum instead of staying at the backed-off value.
 HEALTHY_AFTER_SECONDS=60
@@ -333,7 +344,8 @@ daemon() {
   trap on_signal INT TERM HUP
 
   local name
-  for name in "${SERVICES[@]}"; do
+  [[ " ${START_SERVICES[*]} " == *" email "* ]] || log "email poller disabled (EMAIL_ENABLED=$EMAIL_ENABLED) - starting API only"
+  for name in "${START_SERVICES[@]}"; do
     supervise "$name" &
     echo $! > "$RUN_DIR/$name.supervisor.pid"
   done
