@@ -8,7 +8,7 @@ from app.services.ollama_client import OllamaClient
 
 logger = get_logger(__name__)
 
-PROMPT_VERSION = "v4-sap-contract-1"
+PROMPT_VERSION = "v5-email-context"
 
 # A literal worked example (the canonical sample of the SAP ZFTVIA contract V1, see
 # contract/ZFTVIA_OCR_API_CONTRACT_V1.json) rather than just the abstract JSON schema.
@@ -118,11 +118,13 @@ STRICT RULES - follow exactly, this data feeds financial accounting:
 12. `additional_fields`: EVERY labelled value on the document that has no field of its own - e.g. Customer Order No, Delivery Note, GRN, BL No / Bill of Lading, Container No, Vessel, Voyage, Incoterms, Vehicle Reg, HSN/SAC, IRN, GSTIN of the customer, PAN, Contract No, Account No, Week Ending, Your Reference, Period. `field_name` = the label as printed, `field_value` = the value as printed. Never invent a new top-level key instead.
 13. `document_count_estimate`: how many separate invoices the text contains (normally 1). If the file holds several invoices, extract the FIRST one, set this to the count and add an additional field "Additional invoices in file" with the other invoice numbers separated by ";".
 14. Return ONLY the JSON object. No commentary, no markdown fences.
+15. If an EMAIL block is given, it is the covering email the document was attached to. The INVOICE TEXT is the authority - always prefer it. Use the email only for a header field the invoice text does not contain (e.g. the PO number or invoice number in the subject). Never take line items, amounts or tax from the email, and ignore other invoices or reply history mentioned in it.
 """
 
 
-def build_prompt(source_text: str) -> str:
-    return f"{SYSTEM_INSTRUCTIONS}\n\n--- INVOICE TEXT START ---\n{source_text}\n--- INVOICE TEXT END ---\n"
+def build_prompt(source_text: str, email_context: str | None = None) -> str:
+    email_block = f"\n--- EMAIL (context only) START ---\n{email_context}\n--- EMAIL END ---\n" if email_context else ""
+    return f"{SYSTEM_INSTRUCTIONS}\n{email_block}\n--- INVOICE TEXT START ---\n{source_text}\n--- INVOICE TEXT END ---\n"
 
 
 def _build_correction_prompt(original_prompt: str, previous_raw: dict, error: Exception) -> str:
@@ -139,12 +141,12 @@ def _build_correction_prompt(original_prompt: str, previous_raw: dict, error: Ex
 
 
 def structure_invoice(
-    source_text: str, *, client: OllamaClient | None = None, log=None
+    source_text: str, *, email_context: str | None = None, client: OllamaClient | None = None, log=None
 ) -> InvoiceExtraction:
     log = log or logger
     client = client or OllamaClient()
     schema = get_invoice_json_schema()
-    prompt = build_prompt(source_text)
+    prompt = build_prompt(source_text, email_context)
 
     last_error: Exception | None = None
     last_raw: dict | None = None

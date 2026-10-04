@@ -1,3 +1,6 @@
+import html
+import re
+
 from imap_tools import AND, U, MailMessageFlags
 from imap_tools.message import MailMessage
 
@@ -6,7 +9,7 @@ from app.email_ingest.client import open_mailbox
 from app.logging_conf import get_logger
 from app.pipeline.run import run_pipeline
 from app.pipeline.to_response import build_failure, build_result
-from app.schemas.envelope import EmailInfo
+from app.schemas.envelope import EmailAttachment, EmailInfo
 from app.storage import results_store
 
 logger = get_logger(__name__)
@@ -52,6 +55,42 @@ def _strip_to_pdf_header(payload: bytes) -> bytes:
     return payload[payload.find(b"%PDF-"):]
 
 
+_HTML_DROP_RE = re.compile(r"<(style|script|head)\b.*?</\1>", re.IGNORECASE | re.DOTALL)
+_HTML_BREAK_RE = re.compile(r"<\s*(br|/p|/div|/tr|/li|/h\d)\b[^>]*>", re.IGNORECASE)
+_HTML_TAG_RE = re.compile(r"<[^>]+>")
+
+
+def _email_body(msg: MailMessage) -> str | None:
+    """Plain-text body of the email - the text part, or the HTML part with tags stripped when
+    the sender sent HTML only. Whitespace is collapsed and the result cut to email_body_max_chars."""
+    text = (msg.text or "").strip()
+    if not text and msg.html:
+        text = _HTML_DROP_RE.sub(" ", msg.html)
+        text = _HTML_BREAK_RE.sub("\n", text)
+        text = html.unescape(_HTML_TAG_RE.sub(" ", text))
+    lines = (re.sub(r"[ \t\r\f\v]+", " ", line).strip() for line in text.splitlines())
+    text = re.sub(r"\n{3,}", "\n\n", "\n".join(lines)).strip()
+    return text[: settings.email_body_max_chars] or None
+
+
+def _email_attachments(msg: MailMessage) -> list[EmailAttachment]:
+    return [
+        EmailAttachment(filename=att.filename or None, content_type=att.content_type or None,
+                        size_bytes=len(att.payload or b""), is_pdf=_is_pdf_attachment(att))
+        for att in msg.attachments
+    ]
+
+
+def _email_context(email: EmailInfo) -> str | None:
+    """Subject + sender + body, as shown to the LLM next to the PDF text."""
+    if not settings.email_context_in_prompt:
+        return None
+    parts = [f"Subject: {email.subject or ''}", f"From: {email.sender or ''}"]
+    if email.body:
+        parts += ["", email.body]
+    return "\n".join(parts)
+
+
 def _extract_attachment(key: str, attachment, email: EmailInfo, log) -> bool:
     """Runs the pipeline on one PDF and writes its result to pending/. Returns True once
     this attachment has a result file (success, needs_review, or a final failure), False if
@@ -59,7 +98,7 @@ def _extract_attachment(key: str, attachment, email: EmailInfo, log) -> bool:
     pdf_bytes = _strip_to_pdf_header(attachment.payload)
     results_store.save_pdf(key, pdf_bytes)
     try:
-        result = run_pipeline(pdf_bytes, key)
+        result = run_pipeline(pdf_bytes, key, email_context=_email_context(email))
     except Exception as exc:  # noqa: BLE001 - one bad PDF must not stop the rest
         attempts = results_store.bump_fail(key)
         log.exception("pdf_extraction_failed", key=key, filename=attachment.filename, attempt=attempts)
@@ -115,7 +154,8 @@ def _handle_message(msg: MailMessage) -> bool | None:
 
     message_id = _message_id(msg)
     received_at = msg.date if msg.date.year > 1900 else None  # imap_tools uses 1900-01-01 when missing
-    email = EmailInfo(message_id=message_id, sender=msg.from_, subject=msg.subject, received_at=received_at)
+    email = EmailInfo(message_id=message_id, sender=msg.from_, subject=msg.subject, received_at=received_at,
+                      body=_email_body(msg), attachments=_email_attachments(msg))
 
     all_done = True
     for index, attachment in enumerate(pdf_attachments, start=1):

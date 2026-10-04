@@ -92,7 +92,9 @@ def _ms_since(start: float) -> int:
     return int((time.monotonic() - start) * 1000)
 
 
-def run_pipeline(pdf_bytes: bytes, job_id: str, sap_reference: str | None = None) -> dict:
+def run_pipeline(
+    pdf_bytes: bytes, job_id: str, sap_reference: str | None = None, email_context: str | None = None
+) -> dict:
     """Runs triage -> extract/OCR -> LLM structuring -> grounding -> business rules ->
     status assignment for a single PDF. Raises ExtractionError subclasses on hard failures
     (no usable text, LLM never produced valid JSON) - the caller is responsible for marking
@@ -101,6 +103,10 @@ def run_pipeline(pdf_bytes: bytes, job_id: str, sap_reference: str | None = None
 
     Every stage logs its own start/complete + duration, correlated by job_id, so a slow or
     wrong extraction at 200k/month volume can be traced back to the exact stage that caused it.
+
+    email_context (subject + body of the covering email, email ingestion only) is shown to the
+    LLM next to the PDF text and is part of the text grounding checks against, so a value
+    taken from the email (e.g. a PO number in the subject) isn't flagged as ungrounded.
     """
     started = time.monotonic()
     log = logger.bind(job_id=job_id)
@@ -168,8 +174,9 @@ def run_pipeline(pdf_bytes: bytes, job_id: str, sap_reference: str | None = None
         "llm_structuring_started",
         model=settings.ollama_model,
         prompt_chars=len(normalized.source_text),
+        email_context_chars=len(email_context or ""),
     )
-    extraction = structure_invoice(normalized.source_text, log=log)
+    extraction = structure_invoice(normalized.source_text, email_context=email_context, log=log)
     log.info(
         "llm_structuring_complete",
         model=settings.ollama_model,
@@ -178,7 +185,8 @@ def run_pipeline(pdf_bytes: bytes, job_id: str, sap_reference: str | None = None
 
     # --- Stage 5: grounding (anti-hallucination check) ---
     stage_started = time.monotonic()
-    grounding_results = ground_extraction(extraction, normalized.source_text)
+    grounding_text = f"{normalized.source_text}\n{email_context}" if email_context else normalized.source_text
+    grounding_results = ground_extraction(extraction, grounding_text)
     grounded_count = sum(1 for r in grounding_results if r.grounded)
     log.info(
         "grounding_complete",

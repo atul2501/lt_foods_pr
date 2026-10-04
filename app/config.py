@@ -93,6 +93,14 @@ class Settings(BaseSettings):
     imap_processed_folder: str | None = None
     imap_poll_interval_seconds: float = 60.0
     imap_timeout_seconds: float = 30.0
+    # The email's subject + body are sent to the LLM alongside the PDF text, so a value only
+    # in the covering email (e.g. "PO 6600128207" in the subject) can fill a field the PDF
+    # lacks - the PDF still wins on a conflict. false = the email is only recorded in the
+    # result's `email` block, not used for extraction.
+    email_context_in_prompt: bool = True
+    # Email body is cut to this many characters (in the result JSON and in the prompt) -
+    # signatures and quoted reply chains can be huge.
+    email_body_max_chars: int = 4000
 
     log_level: str = "INFO"
     # JSON logs are also written to this file (in addition to stdout). It always holds today;

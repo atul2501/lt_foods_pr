@@ -88,11 +88,20 @@ class ExtractionMetadata(BaseModel):
     sap_reference: Optional[str] = None     # X-SAP-Reference header of the upload (VIA id)
 
 
+class EmailAttachment(BaseModel):
+    filename: Optional[str] = None
+    content_type: Optional[str] = None
+    size_bytes: int = 0
+    is_pdf: bool = False
+
+
 class EmailInfo(BaseModel):
     message_id: str
     sender: Optional[str] = None
     subject: Optional[str] = None
     received_at: Optional[OutputDate] = None
+    body: Optional[str] = None                  # plain text, cut to email_body_max_chars
+    attachments: list[EmailAttachment] = []     # every attachment of the email, not just PDFs
 
 
 class Confidence(BaseModel):
