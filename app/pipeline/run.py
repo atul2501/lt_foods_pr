@@ -114,7 +114,7 @@ def run_pipeline(
 
     # --- Stage 1: triage ---
     stage_started = time.monotonic()
-    pages = triage_pdf(pdf_bytes)
+    pages, total_pages = triage_pdf(pdf_bytes)
     if not pages:
         log.error("triage_failed", reason="no_pages")
         raise NoUsableTextError("PDF has no pages")
@@ -122,6 +122,8 @@ def run_pipeline(
     log.info(
         "triage_complete",
         pages=len(pages),
+        total_pages=total_pages,
+        truncated=total_pages > len(pages),
         digital_pages=digital_pages,
         scanned_pages=len(pages) - digital_pages,
         duration_ms=_ms_since(stage_started),
