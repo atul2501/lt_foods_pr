@@ -8,7 +8,7 @@ from app.services.ollama_client import OllamaClient
 
 logger = get_logger(__name__)
 
-PROMPT_VERSION = "v5-email-context"
+PROMPT_VERSION = "v6-row-layout"
 
 # A literal worked example (the canonical sample of the SAP ZFTVIA contract V1, see
 # contract/ZFTVIA_OCR_API_CONTRACT_V1.json) rather than just the abstract JSON schema.
@@ -106,6 +106,7 @@ STRICT RULES - follow exactly, this data feeds financial accounting:
 1. Only use values that literally appear in the provided text. NEVER invent, guess, calculate or hallucinate a value that is not present in the text.
 2. Exception - these may be inferred from context: `currency` (from symbols: £ -> GBP, € -> EUR, ₹ or Rs -> INR, $ -> USD), `company_code` (the "bill to" / customer legal entity name as printed), `vendor_country` (from the vendor address or the VAT/GST number prefix, as an ISO 3166-1 alpha-2 code such as GB, PL, IN, DE), `document_type` and `document_direction` (from the document title and who issues it to whom).
 3. MANDATORY, never null: `invoice_number`, `invoice_date`, `vendor_name`, `vendor_tax_id` (VAT number / GSTIN / NIP), `currency`, `document_type` (text), `subtotal`, `tax_amount`, `total_amount` (numbers), and `description`, `amount` for every line item. If one is genuinely not in the text use "" for text or 0 for numbers - never omit the key.
+3a. `invoice_number` is the value printed next to the "Invoice No" / "Invoice Number" / "Inv No" / "Inv #" (or "Credit Note No") label. NEVER use a value labelled Account No, Customer No, Order No, Reference or Page as the invoice number - those go into `additional_fields` (or `po_number`).
 3b. EVERY OTHER field is OPTIONAL and must be `null` when it is not on the document - never "" , "N/A" or 0 for an optional field.
 4. `po_number` must always be present as a key: the customer's purchase order number if printed (also look for "Order No", "PO", "Your Order", "Customer Order"), otherwise null. If several PO numbers are printed, put the first in `po_number` and all of them in `additional_fields` as "Customer Order No".
 5. `gl_account`, `cost_center`, `profit_center` on every line item MUST always be null - SAP determines them.
