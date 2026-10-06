@@ -78,13 +78,17 @@ class OllamaClient:
 
         duration_ms = int((time.monotonic() - started) * 1000)
         body = response.json()
-        raw = body.get("response", "")
+        raw = body.get("response") or ""
+        thinking = body.get("thinking") or ""
         eval_count = body.get("eval_count")
         logger.info(
             "ollama_request_complete",
             host=host,
             model=self.model,
             response_chars=len(raw),
+            thinking_chars=len(thinking),
+            done_reason=body.get("done_reason"),
+            prompt_eval_count=body.get("prompt_eval_count"),
             eval_count=eval_count,
             eval_duration_ns=body.get("eval_duration"),
             duration_ms=duration_ms,
@@ -93,8 +97,45 @@ class OllamaClient:
         if eval_count:
             OLLAMA_EVAL_TOKENS.inc(eval_count)
 
+        # Cloud backends don't always honour `format`: the JSON can arrive wrapped in a
+        # ```json fence, with leading prose, or (thinking models) only in `thinking`.
+        for candidate in (raw, thinking):
+            parsed = _parse_json_object(candidate)
+            if parsed is not None:
+                return parsed
+
+        logger.error(
+            "ollama_response_not_json",
+            host=host,
+            model=self.model,
+            done_reason=body.get("done_reason"),
+            response_head=raw[:300],
+            response_tail=raw[-300:] if len(raw) > 300 else None,
+            thinking_head=thinking[:300] or None,
+        )
+        reason = "empty response" if not raw.strip() else f"unparseable response ({len(raw)} chars)"
+        raise LLMFormatError(
+            f"Ollama did not return valid JSON: {reason}, done_reason={body.get('done_reason')}",
+            raw_text=raw,
+        )
+
+
+def _parse_json_object(text: str) -> dict | None:
+    """Parse `text` as a JSON object, tolerating markdown fences and surrounding prose."""
+    text = text.strip()
+    if not text:
+        return None
+    if text.startswith("```"):
+        text = text.split("\n", 1)[1] if "\n" in text else ""
+        text = text.rsplit("```", 1)[0].strip()
+    try:
+        value = json.loads(text)
+    except json.JSONDecodeError:
+        start, end = text.find("{"), text.rfind("}")
+        if start == -1 or end <= start:
+            return None
         try:
-            return json.loads(raw)
-        except json.JSONDecodeError as exc:
-            logger.error("ollama_response_not_json", host=host, model=self.model, error=str(exc))
-            raise LLMFormatError(f"Ollama did not return valid JSON: {exc}") from exc
+            value = json.loads(text[start : end + 1])
+        except json.JSONDecodeError:
+            return None
+    return value if isinstance(value, dict) else None

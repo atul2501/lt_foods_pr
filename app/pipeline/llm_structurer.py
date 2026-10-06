@@ -141,6 +141,21 @@ def _build_correction_prompt(original_prompt: str, previous_raw: dict, error: Ex
     )
 
 
+def _build_unparseable_retry_prompt(original_prompt: str, raw_text: str | None) -> str:
+    if raw_text and raw_text.strip():
+        previous = f"You returned this, which is not valid JSON:\n{raw_text[:2000]}\n\n"
+    else:
+        previous = "You returned an empty response.\n\n"
+    return (
+        f"{original_prompt}\n\n"
+        "--- YOUR PREVIOUS RESPONSE WAS INVALID ---\n"
+        f"{previous}"
+        "Respond with ONE complete JSON object only: start with `{` and end with `}`. "
+        "No markdown fences, no commentary. Keep `additional_fields` concise - do not repeat "
+        "the same label/value pair for every line item."
+    )
+
+
 def structure_invoice(
     source_text: str, *, email_context: str | None = None, client: OllamaClient | None = None, log=None
 ) -> InvoiceExtraction:
@@ -154,9 +169,12 @@ def structure_invoice(
     max_attempts = 3  # self-hosted rarely needs more than 1; cloud backends that ignore the
     # schema constraint benefit from the extra error-corrective attempts below
     for attempt in range(1, max_attempts + 1):
-        attempt_prompt = (
-            prompt if last_raw is None else _build_correction_prompt(prompt, last_raw, last_error)
-        )
+        if last_raw is not None:
+            attempt_prompt = _build_correction_prompt(prompt, last_raw, last_error)
+        elif isinstance(last_error, LLMFormatError) and last_error.raw_text is not None:
+            attempt_prompt = _build_unparseable_retry_prompt(prompt, last_error.raw_text)
+        else:
+            attempt_prompt = prompt
         raw: dict | None = None
         try:
             log.info("llm_call_attempt", attempt=attempt, max_attempts=max_attempts)
