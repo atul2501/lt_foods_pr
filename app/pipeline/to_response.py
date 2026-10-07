@@ -128,6 +128,40 @@ def normalize_tax_type(value: str | None) -> str:
     return v if v in TAX_TYPES else "OTHER"
 
 
+_SO_PREFIX = "40"   # LT Foods sales orders
+_PO_PREFIX = "66"   # SAP purchase orders
+# A reference token with at least one digit ("4000231178", "PO-4500/22") - not "SO" / "No".
+_REFERENCE_RE = re.compile(r"(?=[A-Za-z0-9\-/.]*\d)[A-Za-z0-9][A-Za-z0-9\-/.]*")
+_SO_LABEL_RE = re.compile(r"sales\s*order|\bs\.?\s?o\b|our\s+order|order\s+ack", re.IGNORECASE)
+_PO_LABEL_RE = re.compile(r"\bp\.?\s?o\b|purchase\s+order|customer\s+order|your\s+order|order\s+no", re.IGNORECASE)
+
+
+def _references(value: str | None) -> list[str]:
+    return _REFERENCE_RE.findall(value or "")
+
+
+def _join_unique(values: list[str]) -> str | None:
+    return ", ".join(dict.fromkeys(v.strip(".-/") for v in values if v.strip(".-/"))) or None
+
+
+def _split_po_so(po_number: str | None, so_number: str | None,
+                 additional_fields: list[AdditionalField]) -> tuple[str | None, str | None]:
+    """Puts each reference in its field by prefix: 40... is a sales order (SO_number), 66... is
+    a purchase order (po_number) - whichever field the LLM put it in. An empty field is filled
+    from a matching labelled additional field ("Sales Order No", "Customer Order No" ...)."""
+    po_values = [v for v in _references(po_number) if not v.startswith(_SO_PREFIX)]
+    so_values = [v for v in _references(po_number) if v.startswith(_SO_PREFIX)]
+    for value in _references(so_number):
+        (po_values if value.startswith(_PO_PREFIX) else so_values).append(value)
+    if not so_values:
+        so_values = [v for f in additional_fields if _SO_LABEL_RE.search(f.field_name)
+                     for v in _references(f.field_value) if v.startswith(_SO_PREFIX)]
+    if not po_values:
+        po_values = [v for f in additional_fields if _PO_LABEL_RE.search(f.field_name)
+                     for v in _references(f.field_value) if v.startswith(_PO_PREFIX)][:1]
+    return (po_number if po_values == _references(po_number) else _join_unique(po_values)), _join_unique(so_values)
+
+
 def _abs_or_none(value: float | None) -> float | None:
     """Amounts are never negative in the contract (document_type carries the sign)."""
     if value is None:
@@ -191,6 +225,13 @@ def build_result(result_id: str, pipeline_result: dict, filename: str | None, em
         "document_type": normalize_document_type(raw.get("document_type"), raw.get("total_amount")),
         "document_direction": normalize_direction(raw.get("document_direction")) or "VENDOR_TO_CUSTOMER",
     }
+    additional_fields = [
+        AdditionalField(field_name=f.field_name.strip(), field_value=_clean_text(f.field_value))
+        for f in extraction.additional_fields
+        if f.field_name and f.field_name.strip()
+    ]
+    header_data["po_number"], header_data["SO_number"] = _split_po_so(
+        header_data.get("po_number"), header_data.get("SO_number"), additional_fields)
     # mandatory string fields keep "" rather than null only when the LLM produced ""
     for name in ("invoice_number", "vendor_name", "currency"):
         if header_data.get(name) is None:
@@ -209,11 +250,6 @@ def build_result(result_id: str, pipeline_result: dict, filename: str | None, em
             d["description"] = ""
         line_items.append(LineItemOut.model_validate(d))
 
-    additional_fields = [
-        AdditionalField(field_name=f.field_name.strip(), field_value=_clean_text(f.field_value))
-        for f in extraction.additional_fields
-        if f.field_name and f.field_name.strip()
-    ]
     tax_details = [
         TaxDetail(tax_type=normalize_tax_type(t.tax_type), tax_rate=t.tax_rate,
                   tax_amount=_abs_or_none(t.tax_amount), taxable_amount=_abs_or_none(t.taxable_amount))

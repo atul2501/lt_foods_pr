@@ -22,6 +22,6 @@ SAP_MANAGED_LINE_FIELDS = ["gl_account", "cost_center", "profit_center"]
 
 # Header fields the contract wants a 0..1 confidence for.
 CONFIDENCE_FIELDS = [
-    "invoice_number", "invoice_date", "vendor_name", "vendor_tax_id", "po_number",
+    "invoice_number", "invoice_date", "vendor_name", "vendor_tax_id", "po_number", "SO_number",
     "total_amount", "subtotal", "tax_amount", "currency", "document_type",
 ]

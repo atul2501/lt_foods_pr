@@ -69,9 +69,14 @@ class Settings(BaseSettings):
     # pages are OCR'd through one shared pool of this size, not a new pool per PDF.
     # CPU-only PaddleOCR (see requirements.txt) - tune to the box's core count.
     ocr_page_workers: int = 4
-    # Invoices are expected to be under 5 pages; only the first N pages of any PDF are
+    # Invoices are expected to be at most 4 pages; only the first N pages of any PDF are
     # read (triage, text extraction, OCR). Later pages are ignored.
-    max_pages_to_process: int = 6
+    max_pages_to_process: int = 4
+    # Email ingestion: only PDFs classified as invoices are extracted (an email often carries
+    # packing lists, BLs, certificates too). A PDF is classified from its first
+    # invoice_detect_pages pages. email_invoices_only=false extracts every PDF.
+    email_invoices_only: bool = True
+    invoice_detect_pages: int = 4
 
     # Email ingestion (IMAP) - app/email_ingest/, run as its own service (email_ingest_main.py).
     # Every PDF attached to an unread message is extracted to STORAGE_DIR/pending/ and

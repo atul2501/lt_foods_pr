@@ -86,5 +86,7 @@ def test_result_with_email_body_matches_contract():
     jsonschema.Draft202012Validator(SCHEMA).validate(data)
     assert data["email"]["body"] == "Please find attached."
     assert data["email"]["attachments"] == [
-        {"filename": "INV-15915.pdf", "content_type": "application/pdf", "size_bytes": len(PDF_BYTES), "is_pdf": True}
+        {"filename": "INV-15915.pdf", "content_type": "application/pdf", "size_bytes": len(PDF_BYTES), "is_pdf": True, "is_invoice": False}
     ]
+    assert {k: data["email"][k] for k in ("Subject_PO", "Subject_BL", "Body_PO", "Body_BL")} == dict.fromkeys(
+        ("Subject_PO", "Subject_BL", "Body_PO", "Body_BL"))

@@ -6,7 +6,9 @@ from imap_tools.message import MailMessage
 
 from app.config import settings
 from app.email_ingest.client import open_mailbox
+from app.email_ingest.references import find_bl, find_po
 from app.logging_conf import get_logger
+from app.pipeline.doc_classify import is_invoice_pdf
 from app.pipeline.run import run_pipeline
 from app.pipeline.to_response import build_failure, build_result
 from app.schemas.envelope import EmailAttachment, EmailInfo
@@ -60,25 +62,44 @@ _HTML_BREAK_RE = re.compile(r"<\s*(br|/p|/div|/tr|/li|/h\d)\b[^>]*>", re.IGNOREC
 _HTML_TAG_RE = re.compile(r"<[^>]+>")
 
 
-def _email_body(msg: MailMessage) -> str | None:
-    """Plain-text body of the email - the text part, or the HTML part with tags stripped when
-    the sender sent HTML only. Whitespace is collapsed and the result cut to email_body_max_chars."""
+def _email_text(msg: MailMessage) -> str:
+    """Full plain-text body of the email - the text part, or the HTML part with tags stripped
+    when the sender sent HTML only. Whitespace is collapsed."""
     text = (msg.text or "").strip()
     if not text and msg.html:
         text = _HTML_DROP_RE.sub(" ", msg.html)
         text = _HTML_BREAK_RE.sub("\n", text)
         text = html.unescape(_HTML_TAG_RE.sub(" ", text))
     lines = (re.sub(r"[ \t\r\f\v]+", " ", line).strip() for line in text.splitlines())
-    text = re.sub(r"\n{3,}", "\n\n", "\n".join(lines)).strip()
-    return text[: settings.email_body_max_chars] or None
+    return re.sub(r"\n{3,}", "\n\n", "\n".join(lines)).strip()
 
 
-def _email_attachments(msg: MailMessage) -> list[EmailAttachment]:
+def _email_body(msg: MailMessage) -> str | None:
+    """_email_text cut to email_body_max_chars."""
+    return _email_text(msg)[: settings.email_body_max_chars] or None
+
+
+def _email_attachments(msg: MailMessage, invoice_ids: set[int] = frozenset()) -> list[EmailAttachment]:
+    """invoice_ids: id() of the attachments classified as invoices."""
     return [
         EmailAttachment(filename=att.filename or None, content_type=att.content_type or None,
-                        size_bytes=len(att.payload or b""), is_pdf=_is_pdf_attachment(att))
+                        size_bytes=len(att.payload or b""), is_pdf=_is_pdf_attachment(att),
+                        is_invoice=id(att) in invoice_ids)
         for att in msg.attachments
     ]
+
+
+def _invoice_attachments(pdf_attachments: list, log) -> list:
+    """The PDF attachments to extract: only the invoices when email_invoices_only is on."""
+    if not settings.email_invoices_only:
+        return pdf_attachments
+    invoices = []
+    for att in pdf_attachments:
+        if is_invoice_pdf(_strip_to_pdf_header(att.payload)):
+            invoices.append(att)
+        else:
+            log.info("email_pdf_skipped_not_invoice", filename=att.filename)
+    return invoices
 
 
 def _email_context(email: EmailInfo) -> str | None:
@@ -152,13 +173,24 @@ def _handle_message(msg: MailMessage) -> bool | None:
         )
         return None
 
+    invoice_attachments = _invoice_attachments(pdf_attachments, log)
+    if not invoice_attachments:
+        log.info("email_skipped_no_invoice_pdf", pdfs=[att.filename for att in pdf_attachments])
+        return None
+
     message_id = _message_id(msg)
     received_at = msg.date if msg.date.year > 1900 else None  # imap_tools uses 1900-01-01 when missing
-    email = EmailInfo(message_id=message_id, sender=msg.from_, subject=msg.subject, received_at=received_at,
-                      body=_email_body(msg), attachments=_email_attachments(msg))
+    full_body = _email_text(msg)
+    email = EmailInfo(
+        message_id=message_id, sender=msg.from_, subject=msg.subject, received_at=received_at,
+        body=full_body[: settings.email_body_max_chars] or None,
+        attachments=_email_attachments(msg, {id(att) for att in invoice_attachments}),
+        Subject_PO=find_po(msg.subject), Subject_BL=find_bl(msg.subject),
+        Body_PO=find_po(full_body, msg.html), Body_BL=find_bl(full_body, msg.html),
+    )
 
     all_done = True
-    for index, attachment in enumerate(pdf_attachments, start=1):
+    for index, attachment in enumerate(invoice_attachments, start=1):
         key = results_store.result_key(message_id, received_at, index)
         if results_store.exists(key):
             # Extracted on an earlier poll that didn't get as far as marking the email read.

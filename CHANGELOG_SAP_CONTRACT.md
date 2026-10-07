@@ -18,3 +18,11 @@
 | `tests/test_contract.py` | Builds a result from a realistic LLM output and validates it against the contract schema. |
 
 Nothing changed in triage / OCR (PaddleOCR) / text extraction / Ollama client / email polling / run.sh / systemd.
+
+# Additions (2026-10-07) – extra keys, allowed by the contract (SAP ignores unknown keys)
+
+| Area | Change |
+|---|---|
+| `invoice_header` | + `SO_number` right after `po_number`: sales order number(s), start with 40, comma-joined if several, null if none. A 40… value the LLM put in `po_number` is moved to `SO_number`, a 66… value in `SO_number` is moved to `po_number`; an empty field is filled from a "Sales Order No" / "Customer Order No" additional field. Also in `confidence`. Prompt `v7-so-number`. |
+| `email` | + `Subject_PO`, `Subject_BL`, `Body_PO`, `Body_BL` (PO / Bill of Lading numbers in the covering email, also read from body tables); `attachments[].is_invoice`. |
+| Email ingestion | Only PDFs classified as invoices (first 4 pages) are extracted – `EMAIL_INVOICES_ONLY`, `INVOICE_DETECT_PAGES`; `MAX_PAGES_TO_PROCESS` 6 → 4. |

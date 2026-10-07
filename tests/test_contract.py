@@ -98,3 +98,58 @@ def test_failure_matches_sap_contract():
 def test_sample_in_contract_validates():
     sample = json.loads((ROOT / "contract" / "SAMPLE_RESPONSE_Brookshaw_15915.json").read_text(encoding="utf-8"))
     jsonschema.Draft202012Validator(SCHEMA).validate(sample)
+
+
+# --- SO_number (sales order, starts with 40) next to po_number (starts with 66) ---
+import pytest  # noqa: E402
+
+from app.pipeline.to_response import _split_po_so  # noqa: E402
+from app.schemas.invoice_schema import AdditionalField  # noqa: E402
+
+
+def _build(**header):
+    llm_output = json.loads(json.dumps(LLM_OUTPUT))
+    additional = header.pop("additional_fields", None)
+    llm_output["invoice_header"].update(header)
+    if additional is not None:
+        llm_output["additional_fields"] = additional
+    extraction = InvoiceExtraction.model_validate(llm_output)
+    data = build_result("job-1", _pipeline_result(extraction), "x.pdf", None).model_dump(mode="json")
+    jsonschema.Draft202012Validator(SCHEMA).validate(data)
+    return data
+
+
+def test_so_number_sits_after_po_number():
+    data = _build(SO_number="4000231178")
+    keys = list(data["invoice_header"])
+    assert keys[keys.index("po_number") + 1] == "SO_number"
+    assert data["invoice_header"]["po_number"] == "6600128207"
+    assert data["invoice_header"]["SO_number"] == "4000231178"
+    assert "SO_number" in data["confidence"]
+
+
+def test_so_number_null_when_absent():
+    assert _build()["invoice_header"]["SO_number"] is None
+
+
+@pytest.mark.parametrize("po, so, fields, expected", [
+    ("6600128207", "4000231178", [], ("6600128207", "4000231178")),        # both references
+    ("4000231178", None, [], (None, "4000231178")),                        # SO in po_number
+    (None, "6600128207", [], ("6600128207", None)),                        # PO in SO_number
+    ("6600128207", None, [("Sales Order No", "4000231178")], ("6600128207", "4000231178")),
+    ("4000231178", None, [("Customer Order No", "6600128207")], ("6600128207", "4000231178")),
+    ("6600128207", "4000231178, 4000231179", [], ("6600128207", "4000231178, 4000231179")),
+    ("6600128207", "SO 4000231178.", [], ("6600128207", "4000231178")),
+    ("PO-4500/22", None, [("Delivery Note", "4000999")], ("PO-4500/22", None)),  # not a SO label
+    (None, None, [], (None, None)),
+])
+def test_split_po_so(po, so, fields, expected):
+    additional = [AdditionalField(field_name=n, field_value=v) for n, v in fields]
+    assert _split_po_so(po, so, additional) == expected
+
+
+def test_ungrounded_so_number_is_reported():
+    extraction = InvoiceExtraction.model_validate(
+        {**LLM_OUTPUT, "invoice_header": {**LLM_OUTPUT["invoice_header"], "SO_number": "4000231178"}})
+    result = next(r for r in ground_extraction(extraction, SOURCE_TEXT) if r.field_path == "invoice_header.SO_number")
+    assert not result.grounded

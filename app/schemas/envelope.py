@@ -93,6 +93,7 @@ class EmailAttachment(BaseModel):
     content_type: Optional[str] = None
     size_bytes: int = 0
     is_pdf: bool = False
+    is_invoice: bool = False    # PDF classified as an invoice (only those are extracted)
 
 
 class EmailInfo(BaseModel):
@@ -102,6 +103,11 @@ class EmailInfo(BaseModel):
     received_at: Optional[OutputDate] = None
     body: Optional[str] = None                  # plain text, cut to email_body_max_chars
     attachments: list[EmailAttachment] = []     # every attachment of the email, not just PDFs
+    # PO / BL (Bill of Lading) numbers found in the subject / full body, comma-joined; null when none.
+    Subject_PO: Optional[str] = None
+    Subject_BL: Optional[str] = None
+    Body_PO: Optional[str] = None
+    Body_BL: Optional[str] = None
 
 
 class Confidence(BaseModel):
@@ -113,6 +119,7 @@ class Confidence(BaseModel):
     vendor_name: Optional[float] = None
     vendor_tax_id: Optional[float] = None
     po_number: Optional[float] = None
+    SO_number: Optional[float] = None
     total_amount: Optional[float] = None
     subtotal: Optional[float] = None
     tax_amount: Optional[float] = None

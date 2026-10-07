@@ -110,7 +110,7 @@ The JSON this service returns is the **SAP contract** in [contract/ZFTVIA_OCR_AP
   "invoice_header": { "invoice_number", "invoice_date" (YYYY-MM-DD), "due_date", "payment_terms", "company_code",
                       "vendor_name", "vendor_address", "vendor_tax_id", "vendor_country" (ISO-2), "vendor_bank_name",
                       "vendor_account_no", "vendor_sort_code", "vendor_iban", "customer_name", "customer_address",
-                      "po_number", "reference_number", "currency" (ISO-4217), "subtotal", "tax_amount", "tax_percent",
+                      "po_number", "SO_number" (sales order, 40…), "reference_number", "currency" (ISO-4217), "subtotal", "tax_amount", "tax_percent",
                       "total_amount", "document_type" (INVOICE|CREDIT_NOTE|DEBIT_NOTE|PROFORMA|STATEMENT|OTHER),
                       "document_direction", "invoice_period_from", "invoice_period_to" },
   "line_items": [ { "line_no", "description", "quantity", "unit", "unit_price", "amount", "tax_percent", "tax_amount",
@@ -119,7 +119,7 @@ The JSON this service returns is the **SAP contract** in [contract/ZFTVIA_OCR_AP
   "tax_details": [ { "tax_type", "tax_rate", "tax_amount", "taxable_amount" } ],
   "purchase_order_items": [ { "po_number", "po_item", "invoice_line_no", "quantity", "unit_price", "amount" } ],
   "confidence": { "invoice_number": 0.99, "invoice_date": …, "vendor_name": …, "vendor_tax_id": …, "po_number": …,
-                  "total_amount": …, "subtotal": …, "tax_amount": …, "currency": …, "document_type": … },
+                  "SO_number": …, "total_amount": …, "subtotal": …, "tax_amount": …, "currency": …, "document_type": … },
   "email": {…}, "metadata": { "flags": [...], "model_name", "prompt_version", "extraction_source", "avg_ocr_confidence",
                               "processing_time_ms", "completed_at", "pdf_sha256", "sap_reference" }
 }

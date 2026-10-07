@@ -31,7 +31,8 @@ class InvoiceHeader(BaseModel):
     vendor_iban: Optional[str] = None
     customer_name: Optional[str] = None
     customer_address: Optional[str] = None
-    po_number: Optional[str] = None         # null when no PO is printed
+    po_number: Optional[str] = None         # null when no PO is printed (SAP POs start with 66)
+    SO_number: Optional[str] = None         # sales order number(s), start with 40; comma-joined if several
     reference_number: Optional[str] = None
     currency: str                           # ISO 4217
     subtotal: float
