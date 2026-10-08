@@ -76,6 +76,10 @@ class Settings(BaseSettings):
     # packing lists, BLs, certificates too). A PDF is classified from its first
     # invoice_detect_pages pages. email_invoices_only=false extracts every PDF.
     email_invoices_only: bool = True
+    # An extracted email invoice is kept only when its customer (customer_name / company_code)
+    # starts with this - "LT" matches "LT FOODS UK LIMITED", "L.T. Foods Ltd", not "LTD ..." or
+    # "Tesco". Other invoices get no JSON. Empty = keep every invoice. Not applied to API uploads.
+    email_customer_prefix: str = "LT"
     invoice_detect_pages: int = 4
 
     # Email ingestion (IMAP) - app/email_ingest/, run as its own service (email_ingest_main.py).

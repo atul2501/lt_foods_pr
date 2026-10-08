@@ -187,3 +187,73 @@ def test_pre_alert_email_end_to_end(captured):
 def test_invoice_title_variants(line, expected):
     from app.pipeline.doc_classify import _is_invoice_line
     assert _is_invoice_line(line) is expected
+
+
+# --- only invoices billed to LT Foods (customer starting with LT / L.T.) are kept ---
+from app.schemas.envelope import EmailInfo  # noqa: E402
+
+
+def _header(customer=None, company=None):
+    return SimpleNamespace(customer_name=customer, company_code=company)
+
+
+@pytest.mark.parametrize("customer, company, expected", [
+    ("LT FOODS UK LIMITED", None, True),
+    ("L.T. Foods Europe Ltd", None, True),
+    ("L. T. FOODS LTD", None, True),
+    ("lt foods", None, True),
+    ("LTFOODS", None, True),
+    (None, "LT Foods Europe Ltd", True),
+    ("Tesco Stores Ltd", None, False),
+    ("LTD Logistics", None, False),
+    ("ACME for LT Foods", None, False),
+    (None, None, None),
+])
+def test_customer_matches(customer, company, expected):
+    assert ingest._customer_matches(_header(customer, company)) is expected
+
+
+def test_customer_check_off(monkeypatch):
+    monkeypatch.setattr(ingest.settings, "email_customer_prefix", "")
+    assert ingest._customer_matches(_header("Tesco")) is None
+
+
+@pytest.fixture
+def extract_env(monkeypatch):
+    written, pushed = [], []
+    monkeypatch.setattr(ingest.results_store, "save_pdf", lambda key, data: None)
+    monkeypatch.setattr(ingest.results_store, "pdf_url", lambda key: f"/pdf/{key}")
+    monkeypatch.setattr(ingest.results_store, "write_pending", lambda key, data: written.append(data))
+    monkeypatch.setattr(ingest.results_store, "register_hash", lambda data, key: None)
+    monkeypatch.setattr(ingest.results_store, "clear_fail", lambda key: None)
+    monkeypatch.setattr(ingest, "_push_to_sap", lambda *a: pushed.append(a))
+    monkeypatch.setattr(ingest, "run_pipeline", lambda *a, **k: {"status": "success"})
+
+    def run(customer):
+        monkeypatch.setattr(ingest, "build_result", lambda key, result, filename, email: SimpleNamespace(
+            invoice_header=_header(customer), pdf_url=None, model_dump=lambda mode: {"customer": customer}))
+        log = SimpleNamespace(info=lambda *a, **k: None, warning=lambda *a, **k: None, exception=lambda *a, **k: None)
+        done = ingest._extract_attachment("k1", _att("inv.pdf", b"%PDF-1.4"), EmailInfo(message_id="m1"), log)
+        return done, list(written), list(pushed)
+    return run
+
+
+def test_lt_foods_customer_is_written(extract_env):
+    done, written, pushed = extract_env("LT FOODS UK LIMITED")
+    assert done and written == [{"customer": "LT FOODS UK LIMITED"}] and len(pushed) == 1
+
+
+def test_other_customer_is_skipped(extract_env):
+    done, written, pushed = extract_env("ACME Ltd")
+    assert done and written == [] and pushed == []
+
+
+def test_unknown_customer_is_kept(extract_env):
+    done, written, _ = extract_env(None)
+    assert done and written == [{"customer": None}]
+
+
+def test_other_customer_kept_when_check_off(extract_env, monkeypatch):
+    monkeypatch.setattr(ingest.settings, "email_customer_prefix", "")
+    _, written, _ = extract_env("ACME Ltd")
+    assert written == [{"customer": "ACME Ltd"}]

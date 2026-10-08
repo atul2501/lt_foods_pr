@@ -112,10 +112,31 @@ def _email_context(email: EmailInfo) -> str | None:
     return "\n".join(parts)
 
 
+def _customer_prefix_re(prefix: str) -> re.Pattern:
+    # "LT" -> L, optional dots/spaces, T; then a non-letter or "FOODS": matches "LT FOODS UK",
+    # "L.T. Foods", "L. T. FOODS", "LTFOODS" - not "LTD Logistics".
+    letters = r"\s*\.?\s*".join(re.escape(c) for c in prefix if c.isalnum())
+    return re.compile(rf"^\W*{letters}(?![a-z])|^\W*{letters}(?=foods)", re.IGNORECASE)
+
+
+def _customer_matches(header) -> bool | None:
+    """Is the invoice billed to LT Foods - customer_name or company_code starting with
+    settings.email_customer_prefix? None when neither is filled (or the check is off)."""
+    prefix = settings.email_customer_prefix.strip()
+    if not prefix or header is None:
+        return None
+    names = [n for n in (header.customer_name, header.company_code) if n and n.strip()]
+    if not names:
+        return None
+    pattern = _customer_prefix_re(prefix)
+    return any(pattern.match(n) for n in names)
+
+
 def _extract_attachment(key: str, attachment, email: EmailInfo, log) -> bool:
     """Runs the pipeline on one PDF and writes its result to pending/. Returns True once
-    this attachment has a result file (success, needs_review, or a final failure), False if
-    it failed and should be retried on the next poll."""
+    this attachment is done (a result file - success, needs_review, or a final failure - or
+    skipped because the customer isn't LT Foods), False if it failed and should be retried
+    on the next poll."""
     pdf_bytes = _strip_to_pdf_header(attachment.payload)
     results_store.save_pdf(key, pdf_bytes)
     try:
@@ -133,6 +154,14 @@ def _extract_attachment(key: str, attachment, email: EmailInfo, log) -> bool:
         return True
 
     item = build_result(key, result, attachment.filename, email)
+    customer_ok = _customer_matches(item.invoice_header)
+    if customer_ok is False:
+        log.info("email_pdf_skipped_customer_not_lt_foods", key=key, filename=attachment.filename,
+                 customer_name=item.invoice_header.customer_name, company_code=item.invoice_header.company_code)
+        results_store.clear_fail(key)
+        return True
+    if customer_ok is None and settings.email_customer_prefix:
+        log.warning("email_customer_unknown", key=key, filename=attachment.filename)
     item.pdf_url = results_store.pdf_url(key)
     results_store.write_pending(key, item.model_dump(mode="json"))
     results_store.register_hash(pdf_bytes, key)
