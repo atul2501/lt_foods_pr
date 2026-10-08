@@ -171,3 +171,19 @@ def test_pre_alert_email_end_to_end(captured):
     email = captured[0][2]
     assert (email.Subject_PO, email.Subject_BL, email.Body_PO, email.Body_BL) == (
         "9400000909", "46671906", "9400000909", "46671906")
+
+
+@pytest.mark.parametrize("line, expected", [
+    ("COMM.INVOICE", True),            # OCR of the LT Foods PRE_ALERT commercial invoice
+    ("Comm. Invoice", True),
+    ("COML INVOICE", True),
+    ("TAXINVOICE", True),
+    ("TAX INVOlCE", True),             # OCR l for I
+    ("Involce No. & Date", False),
+    ("INVOICE NO.", False),
+    ("INVOICE VALUE", False),
+    ("CERTIFICATE OF INSURANCE", False),
+])
+def test_invoice_title_variants(line, expected):
+    from app.pipeline.doc_classify import _is_invoice_line
+    assert _is_invoice_line(line) is expected
