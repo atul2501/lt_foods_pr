@@ -140,7 +140,10 @@ def test_so_number_null_when_absent():
     ("4000231178", None, [("Customer Order No", "6600128207")], ("6600128207", "4000231178")),
     ("6600128207", "4000231178, 4000231179", [], ("6600128207", "4000231178, 4000231179")),
     ("6600128207", "SO 4000231178.", [], ("6600128207", "4000231178")),
-    ("PO-4500/22", None, [("Delivery Note", "4000999")], ("PO-4500/22", None)),  # not a SO label
+    ("PO-4500/22", None, [("Delivery Note", "4000999")], (None, None)),  # not 66, not a SO label
+    ("12345", "ABC-9", [], (None, None)),                                  # neither 66 nor 40
+    ("6600128207, 4500123", None, [], ("6600128207", None)),
+    (None, "4000231178, 99887", [], (None, "4000231178")),
     (None, None, [], (None, None)),
 ])
 def test_split_po_so(po, so, fields, expected):

@@ -146,20 +146,20 @@ def _join_unique(values: list[str]) -> str | None:
 
 def _split_po_so(po_number: str | None, so_number: str | None,
                  additional_fields: list[AdditionalField]) -> tuple[str | None, str | None]:
-    """Puts each reference in its field by prefix: 40... is a sales order (SO_number), 66... is
-    a purchase order (po_number) - whichever field the LLM put it in. An empty field is filled
-    from a matching labelled additional field ("Sales Order No", "Customer Order No" ...)."""
-    po_values = [v for v in _references(po_number) if not v.startswith(_SO_PREFIX)]
-    so_values = [v for v in _references(po_number) if v.startswith(_SO_PREFIX)]
-    for value in _references(so_number):
-        (po_values if value.startswith(_PO_PREFIX) else so_values).append(value)
+    """Puts each reference in its field by prefix: 66... is a purchase order (po_number), 40...
+    is a sales order (SO_number) - whichever field the LLM put it in; anything else goes in
+    neither. An empty field is filled from a matching labelled additional field
+    ("Sales Order No", "Customer Order No" ...)."""
+    values = _references(po_number) + _references(so_number)
+    po_values = [v for v in values if v.startswith(_PO_PREFIX)]
+    so_values = [v for v in values if v.startswith(_SO_PREFIX)]
     if not so_values:
         so_values = [v for f in additional_fields if _SO_LABEL_RE.search(f.field_name)
                      for v in _references(f.field_value) if v.startswith(_SO_PREFIX)]
     if not po_values:
         po_values = [v for f in additional_fields if _PO_LABEL_RE.search(f.field_name)
                      for v in _references(f.field_value) if v.startswith(_PO_PREFIX)][:1]
-    return (po_number if po_values == _references(po_number) else _join_unique(po_values)), _join_unique(so_values)
+    return _join_unique(po_values), _join_unique(so_values)
 
 
 def _abs_or_none(value: float | None) -> float | None:
