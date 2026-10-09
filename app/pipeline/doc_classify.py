@@ -13,11 +13,11 @@ logger = get_logger(__name__)
 
 # A line that IS the document title - "TAX INVOICE", "Commercial Invoice (Original)",
 # "COMM.INVOICE", "CREDIT NOTE" - not "Invoice No: 123" / "Invoice Date" as printed on a
-# packing list or BL. Prefixes may be abbreviated ("COMM.", "COML.") and joined by a dot or
+# packing list or BL. Carrier invoices are titled "IMPORT INVOICE" (Maersk) / "FREIGHT INVOICE". Prefixes may be abbreviated ("COMM.", "COML.") and joined by a dot or
 # nothing; "inv[o0][i1l]ce" tolerates OCR misreads (INVOlCE, INV0ICE).
 _TITLE_RE = re.compile(
     r"^(?:(?:tax|commercial|comm|coml|com'l|sales|export|gst|vat|final|original|proforma|pro\s*-?\s*forma"
-    r"|customs|retail|service)[\s.]*)*"
+    r"|customs|retail|service|import|freight|shipping)[\s.]*)*"
     r"(?:inv[o0][i1l]ce|credit\s*note|debit\s*note)"
     r"(?:\s*[-/(]?\s*(?:original|duplicate|triplicate|copy|for\s+[a-z ]+)?\s*\)?)?$",
     re.IGNORECASE,

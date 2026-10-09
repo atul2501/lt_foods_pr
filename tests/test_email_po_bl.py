@@ -179,6 +179,8 @@ def test_pre_alert_email_end_to_end(captured):
     ("COML INVOICE", True),
     ("TAXINVOICE", True),
     ("TAX INVOlCE", True),             # OCR l for I
+    ("IMPORT INVOICE", True),          # Maersk carrier invoice
+    ("FREIGHT INVOICE", True),
     ("Involce No. & Date", False),
     ("INVOICE NO.", False),
     ("INVOICE VALUE", False),
