@@ -8,7 +8,7 @@ from app.services.ollama_client import OllamaClient
 
 logger = get_logger(__name__)
 
-PROMPT_VERSION = "v8-bl-number"
+PROMPT_VERSION = "v9-billed-lines"
 
 # A literal worked example (the canonical sample of the SAP ZFTVIA contract V1, see
 # contract/ZFTVIA_OCR_API_CONTRACT_V1.json) rather than just the abstract JSON schema.
@@ -120,6 +120,7 @@ STRICT RULES - follow exactly, this data feeds financial accounting:
 7. Numbers: plain JSON numbers with a dot decimal separator and no thousands separators or currency symbols (36 558,51 -> 36558.51; £1,635.24 -> 1635.24). Amounts are positive; a credit note is expressed by `document_type` = "CREDIT_NOTE", not by negative amounts. `amount` of a line item is the NET value of that line.
 8. `document_type` must be one of INVOICE, CREDIT_NOTE, DEBIT_NOTE, DELIVERY_NOTE, TIMESHEET, PROFORMA, STATEMENT, OTHER. Use DELIVERY_NOTE for delivery notes, packing lists and despatch notes and TIMESHEET for timesheets (they are not posted in SAP). `document_direction` is VENDOR_TO_CUSTOMER when a supplier bills us, CUSTOMER_TO_VENDOR when the document is issued by us.
 9. `line_items`: one entry per physical line in printed order, including freight, packing, pallet or discount lines. `unit` is the unit of measure as printed (EA, PCS, KG, ROL, PAL, HRS ...). Fill `po_number`/`po_item` on a line only when that line prints its own PO number / PO item.
+9a. `line_items` are the BILLED lines only: the rows of the invoice's main billing / summary table, whose amounts add up to the net amount / subtotal. If the document ALSO prints a breakdown of those same totals (e.g. "PRODUCT PRICES", "Spend Analysis", "Activity Analysis", "Transactions", charges per category such as Inbound / Hire / Outbound / Transport under each product), that breakdown is NOT line items - never list it, never mix rows of both tables, never count the same money twice. Take `description`, `quantity`, `unit_price` and `amount` from the billing row itself (null for a value that row does not print). Check: the sum of `amount` over line_items must equal `subtotal`.
 10. `tax_details`: one entry per tax type and rate shown in the totals block (VAT 20, VAT 0, CGST 9 + SGST 9, IGST 18, reverse charge 0 ...). `tax_type` must be one of VAT, GST, CGST, SGST, IGST, UTGST, CESS, SALES_TAX, WHT, OTHER. Use an empty array if no tax breakdown is printed.
 11. `purchase_order_items`: only when the document prints a PO number and PO item/line per invoice line (or a PO/line table); `invoice_line_no` refers to the `line_no` of the matching line item. Otherwise an empty array.
 12. `additional_fields`: EVERY labelled value on the document that has no field of its own - e.g. Customer Order No, Delivery Note, GRN, BL No / Bill of Lading, Container No, Vessel, Voyage, Incoterms, Vehicle Reg, HSN/SAC, IRN, GSTIN of the customer, PAN, Contract No, Account No, Week Ending, Your Reference, Period. `field_name` = the label as printed, `field_value` = the value as printed. Never invent a new top-level key instead.

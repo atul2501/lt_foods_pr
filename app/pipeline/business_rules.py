@@ -112,10 +112,34 @@ def check_line_items(extraction: InvoiceExtraction) -> list[RuleViolation]:
     return violations
 
 
+def check_line_total(extraction: InvoiceExtraction) -> list[RuleViolation]:
+    """The line amounts SAP receives (always positive, see to_response.py) must add up to the
+    subtotal. Catches the LLM listing a breakdown table as well as / instead of the billed
+    lines (e.g. CHEP's per-charge "PRODUCT PRICES" pages next to the per-product SUMMARY), and
+    credit/return rows whose sign the contract cannot carry."""
+    header = extraction.invoice_header
+    if not extraction.line_items or not header.subtotal:
+        return []
+    line_sum = sum(abs(item.amount or 0.0) for item in extraction.line_items)
+    tolerance = max(settings.arithmetic_tolerance_abs, abs(header.subtotal) * settings.arithmetic_tolerance_rel)
+    if abs(line_sum - abs(header.subtotal)) > tolerance:
+        return [
+            RuleViolation(
+                "line_items",
+                "line_total_mismatch",
+                "critical",
+                f"sum(line_items.amount)={line_sum:.2f} != subtotal({header.subtotal}) "
+                f"over {len(extraction.line_items)} lines",
+            )
+        ]
+    return []
+
+
 def run_business_rules(extraction: InvoiceExtraction) -> list[RuleViolation]:
     return [
         *check_mandatory_fields(extraction),
         *check_contract_values(extraction),
         *check_arithmetic(extraction),
         *check_line_items(extraction),
+        *check_line_total(extraction),
     ]
