@@ -23,18 +23,44 @@ _TITLE_RE = re.compile(
     re.IGNORECASE,
 )
 _TITLE_MAX_CHARS = 40
+# A credit / debit note prints its number on the title line: "CREDIT NOTE NO.: 2409341997".
+# Not done for "Invoice No:", which packing lists and BLs print too.
+_NOTE_NO_RE = re.compile(r"^(?:credit|debit)\s*note\s*(?:no\b|number\b|#)", re.IGNORECASE)
+# Letter-spaced titles: "C R E D I T   N O T E", "I N V O I C E" -> "CREDIT   NOTE", "INVOICE".
+_SPACED_WORD_RE = re.compile(r"(?<![A-Za-z])(?:[A-Za-z] ){2,}[A-Za-z](?![A-Za-z])")
+# Non-invoice documents that print "Commercial invoice" as a field value (CHED: "Type:
+# Commercial invoice"). An invoice title on a page carrying one of these is ignored.
+_NOT_INVOICE_PAGE_RE = re.compile(
+    r"common\s+health\s+entry\s+document|certificate\s+of\s+insurance|\bMRN\s*:", re.IGNORECASE)
 
 
 def _is_invoice_line(text: str) -> bool:
+    return _has_po_66(text) or _is_title_line(text)
+
+
+def _has_po_66(text: str) -> bool:
+    return bool(PO_66_RE.search(text))
+
+
+def _is_title_line(text: str) -> bool:
+    text = _SPACED_WORD_RE.sub(lambda m: m.group().replace(" ", ""), text)
     line = re.sub(r"\s+", " ", text).strip(" \t:-*_=|.")
-    if PO_66_RE.search(line):
+    if _NOTE_NO_RE.match(line):
         return True
     return len(line) <= _TITLE_MAX_CHARS and bool(_TITLE_RE.match(line))
 
 
+def _is_invoice_page(lines: list[str]) -> bool:
+    """A 66... PO anywhere, or an invoice title line on a page that isn't a known non-invoice
+    document (customs declaration, CHED, insurance certificate)."""
+    if any(_has_po_66(l) for l in lines):
+        return True
+    return any(_is_title_line(l) for l in lines) and not _NOT_INVOICE_PAGE_RE.search("\n".join(lines))
+
+
 def is_invoice_pdf(pdf_bytes: bytes) -> bool:
     """True if one of the first invoice_detect_pages pages has an invoice title line or a
-    reference starting with 66 (SAP PO). If the PDF can't be read it returns True, so the
+    reference starting with 66 (SAP PO) - see _is_invoice_page. If the PDF can't be read it returns True, so the
     normal pipeline (and its failure handling) deals with it instead of it being dropped."""
     # Imported here: app.pipeline.run imports the whole pipeline (and PaddleOCR lazily).
     from app.pipeline.run import _await_ocr_page, _submit_ocr_page
@@ -44,13 +70,13 @@ def is_invoice_pdf(pdf_bytes: bytes) -> bool:
         pages = pages[: settings.invoice_detect_pages]
         # Digital pages are cheap - check them first; OCR the scanned ones only if needed.
         for page in pages:
-            if page.is_digital and any(_is_invoice_line(l.text) for l in extract_digital_page_text(pdf_bytes, page.page_number)):
+            if page.is_digital and _is_invoice_page([l.text for l in extract_digital_page_text(pdf_bytes, page.page_number)]):
                 return True
         scanned = [p.page_number for p in pages if not p.is_digital]
         futures = {n: _submit_ocr_page(pdf_bytes, n) for n in scanned}
         try:
             for page_number, future in futures.items():
-                if any(_is_invoice_line(l.text) for l in _await_ocr_page(future, page_number)):
+                if _is_invoice_page([l.text for l in _await_ocr_page(future, page_number)]):
                     return True
         finally:
             for future in futures.values():

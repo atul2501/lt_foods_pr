@@ -187,10 +187,33 @@ def test_pre_alert_email_end_to_end(captured):
     ("INVOICE NO.", False),
     ("INVOICE VALUE", False),
     ("CERTIFICATE OF INSURANCE", False),
+    ("I N V O I C E", True),           # Brookshaw, letter-spaced
+    ("C R E D I T   N O T E  NO.:           2409341997           AUG. 6, 2026", True),  # Hapag-Lloyd
+    ("CREDIT NOTE NO. 2409341997", True),
+    ("Debit Note Number: 77", True),
+    ("TO INVOICE NO.        :               2409341657 AUG. 6, 2026", False),
+    ("Invoice No: 15915", False),      # packing list / BL label, still not a title
+    ("C R E D I T   N O T E  T O T A L S   F O R   T H E   Y E A R", False),
 ])
 def test_invoice_title_variants(line, expected):
     from app.pipeline.doc_classify import _is_invoice_line
     assert _is_invoice_line(line) is expected
+
+
+@pytest.mark.parametrize("lines, expected", [
+    (["TAX INVOICE", "Invoice No 15915"], True),
+    # CHED (UK health entry) lists its accompanying documents - "Commercial invoice" is a value
+    (["Common Health Entry Document", "I.9. Accompanying documents", "Type", "Commercial invoice"], False),
+    (["[1/1] | [1/2] Declaration IM A MRN: 26GB8CRT0B4MWPMAR5", "Commercial invoice"], False),
+    (["CERTIFICATE OF INSURANCE", "Invoice No.", "INVOICE"], False),
+    # a 66... PO still counts on any page
+    (["Common Health Entry Document", "PO 6600128207"], True),
+    # Maersk invoices print "Bill of Lading" as a label on the title page - still an invoice
+    (["IMPORT INVOICE", "Bill of Lading 263377714"], True),
+])
+def test_invoice_page(lines, expected):
+    from app.pipeline.doc_classify import _is_invoice_page
+    assert _is_invoice_page(lines) is expected
 
 
 # --- only invoices billed to LT Foods (customer starting with LT / L.T.) are kept ---
