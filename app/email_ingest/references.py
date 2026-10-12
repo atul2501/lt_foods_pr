@@ -19,6 +19,10 @@ _BL_RE = re.compile(
 )
 # SAP purchase orders start with 66 - counted as a PO even with no label.
 PO_66_RE = re.compile(r"(?<![A-Za-z0-9])66\d{6,}(?![A-Za-z0-9])")
+# 66... / 40... series inside a Reference value: only the digits, a label glued on the front
+# ("PO:669384043", "{PO} 669384043") is allowed, another digit is not.
+REFERENCE_PO_RE = re.compile(r"(?<!\d)66\d{6,}(?!\d)")
+REFERENCE_SO_RE = re.compile(r"(?<!\d)40\d{6,}(?!\d)")
 
 
 # Column headers of a table in the body - "PO No.", "Purchase Order", "Booking/BL number", "B/L No".
@@ -104,6 +108,21 @@ def find_po(text: str | None, html: str | None = None) -> str | None:
         + [(m.start(), m.group()) for m in PO_66_RE.finditer(text or "")]
     )
     return _join([value for _, value in found] + _column_values(html, _PO_HEADER_RE))
+
+
+def find_labelled_po(text: str | None) -> str | None:
+    """PO numbers printed after a PO / Purchase Order label, comma-joined - no unlabelled 66s."""
+    return _join([m.group(1) for m in _PO_RE.finditer(text or "")])
+
+
+def has_po_label(text: str | None) -> bool:
+    """Does the text print a PO / P.O. / Purchase Order label (the value may sit elsewhere)?"""
+    return bool(_PO_HEADER_RE.search(text or ""))
+
+
+def has_bl_label(text: str | None) -> bool:
+    """Does the text print a BL / B/L / BOL / Bill of Lading label?"""
+    return bool(_BL_HEADER_RE.search(text or ""))
 
 
 def find_bl(text: str | None, html: str | None = None) -> str | None:

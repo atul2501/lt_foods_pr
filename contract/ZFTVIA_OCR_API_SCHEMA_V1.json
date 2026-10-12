@@ -194,6 +194,18 @@
           ],
           "maxLength": 35
         },
+        "SO_number": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "BL_number": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "reference_number": {
           "type": [
             "string",

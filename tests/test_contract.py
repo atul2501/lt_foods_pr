@@ -17,7 +17,7 @@ SCHEMA = json.loads((ROOT / "contract" / "ZFTVIA_OCR_API_SCHEMA_V1.json").read_t
 
 SOURCE_TEXT = """Brookshaw Stuart Ltd  Unit 4, Riverside Business Park, Rochdale, OL11 2PX
 VAT Reg No GB123456789   INVOICE   Invoice No 15915   Date 18/09/2026   Due 18/10/2026
-To: LT Foods Europe Ltd, Harrow   Your Order No 6600128207   Delivery Note DN 44821
+To: LT Foods Europe Ltd, Harrow   Your PO No 6600128207   Delivery Note DN 44821
 1  Pallet wrap 500mm x 300m clear   40 ROL  21.50  860.00
 2  Strapping tape 12mm x 66m      120 ROL  4.189  502.70
 Sub total 1,362.70   VAT 20% 272.54   Total £1,635.24
@@ -57,7 +57,7 @@ def _pipeline_result(extraction: InvoiceExtraction) -> dict:
     return {
         "extraction": extraction, "status": status.status, "flags": status.flags, "grounding_results": grounding,
         "page_count": 1, "avg_ocr_confidence": None, "model_name": "test", "prompt_version": "test",
-        "extraction_source": "digital", "source_text_hash": "x", "pdf_sha256": "y", "sap_reference": "VIA-2026-000000001",
+        "extraction_source": "digital", "source_text": SOURCE_TEXT, "source_text_hash": "x", "pdf_sha256": "y", "sap_reference": "VIA-2026-000000001",
         "processing_time_ms": 1, "completed_at": datetime.now(timezone.utc),
     }
 
@@ -100,10 +100,10 @@ def test_sample_in_contract_validates():
     jsonschema.Draft202012Validator(SCHEMA).validate(sample)
 
 
-# --- SO_number (sales order, starts with 40) next to po_number (starts with 66) ---
+# --- PO / SO / BL: printed label first, else Reference (66 -> PO, 40 -> SO) ---
 import pytest  # noqa: E402
 
-from app.pipeline.to_response import _split_po_so  # noqa: E402
+from app.pipeline.to_response import _determine_po_so_bl  # noqa: E402
 from app.schemas.invoice_schema import AdditionalField  # noqa: E402
 
 
@@ -120,7 +120,7 @@ def _build(**header):
 
 
 def test_so_number_sits_after_po_number():
-    data = _build(SO_number="4000231178")
+    data = _build(reference_number="4000231178")
     keys = list(data["invoice_header"])
     assert keys[keys.index("po_number") + 1] == "SO_number"
     assert data["invoice_header"]["po_number"] == "6600128207"
@@ -132,23 +132,42 @@ def test_so_number_null_when_absent():
     assert _build()["invoice_header"]["SO_number"] is None
 
 
-@pytest.mark.parametrize("po, so, fields, expected", [
-    ("6600128207", "4000231178", [], ("6600128207", "4000231178")),        # both references
-    ("4000231178", None, [], (None, "4000231178")),                        # SO in po_number
-    (None, "6600128207", [], ("6600128207", None)),                        # PO in SO_number
-    ("6600128207", None, [("Sales Order No", "4000231178")], ("6600128207", "4000231178")),
-    ("4000231178", None, [("Customer Order No", "6600128207")], ("6600128207", "4000231178")),
-    ("6600128207", "4000231178, 4000231179", [], ("6600128207", "4000231178, 4000231179")),
-    ("6600128207", "SO 4000231178.", [], ("6600128207", "4000231178")),
-    ("PO-4500/22", None, [("Delivery Note", "4000999")], (None, None)),  # not 66, not a SO label
-    ("12345", "ABC-9", [], (None, None)),                                  # neither 66 nor 40
-    ("6600128207, 4500123", None, [], ("6600128207", None)),
-    (None, "4000231178, 99887", [], (None, "4000231178")),
-    (None, None, [], (None, None)),
+MAERSK_TEXT = "IMPORT INVOICE\nInvoice Number 7544757640\nVessel/Voyage Direction Reference\nBill of Lading 263377714\n"
+
+
+@pytest.mark.parametrize("text, llm, ref, fields, expected", [
+    # Statement 1: PO / BL printed on the PDF -> the number as printed, no 66 check
+    ("PO No: 4500123", {}, None, [], ("4500123", None, None)),
+    ("Purchase Order 6600128207", {}, "4000231178", [], ("6600128207", "4000231178", None)),
+    ("P.O. Number\n...\n4500999", {"po": "4500999"}, None, [], ("4500999", None, None)),  # table layout
+    (MAERSK_TEXT, {}, None, [], (None, None, "263377714")),
+    ("B/L No. MAEU1234", {}, None, [], (None, None, "MAEU1234")),
+    # per field: BL printed, PO from the Reference
+    (MAERSK_TEXT, {}, "6600128207", [], ("6600128207", None, "263377714")),
+    # Statements 2-4: no label -> Reference, 66 = PO, 40 = SO, only the number
+    ("Invoice 1", {}, "669384043", [], ("669384043", None, None)),
+    ("Invoice 1", {}, "{PO}669384043", [], ("669384043", None, None)),
+    ("Invoice 1", {}, "4000231178", [], (None, "4000231178", None)),
+    ("Invoice 1", {}, None, [("Your Reference", "6612345678")], ("6612345678", None, None)),
+    ("Invoice 1", {}, None, [("Delivery Note", "6612345678")], (None, None, None)),  # not a reference
+    # Statement 5: other series -> both blank
+    ("Invoice 1", {}, "DN 44821", [], (None, None, None)),
+    ("Invoice 1", {"po": "4500123"}, "12345", [], (None, None, None)),   # LLM PO without a printed label
+    ("P.O. Box 12, London", {}, "6600128207", [], ("6600128207", None, None)),  # P.O. Box is no PO
+    (None, {}, None, [], (None, None, None)),
+    # a printed sales order (40...) the LLM found stays the SO
+    ("Invoice 1", {"so": "SO 4000231178"}, None, [], (None, "4000231178", None)),
 ])
-def test_split_po_so(po, so, fields, expected):
+def test_determine_po_so_bl(text, llm, ref, fields, expected):
     additional = [AdditionalField(field_name=n, field_value=v) for n, v in fields]
-    assert _split_po_so(po, so, additional) == expected
+    assert _determine_po_so_bl(text or "", llm.get("po"), llm.get("so"), llm.get("bl"), ref, additional) == expected
+
+
+def test_bl_number_in_result():
+    data = _build(BL_number="263377714")   # SOURCE_TEXT has no BL label -> not trusted
+    assert data["invoice_header"]["BL_number"] is None
+    keys = list(data["invoice_header"])
+    assert keys[keys.index("SO_number") + 1] == "BL_number"
 
 
 def test_ungrounded_so_number_is_reported():

@@ -8,7 +8,7 @@ from app.services.ollama_client import OllamaClient
 
 logger = get_logger(__name__)
 
-PROMPT_VERSION = "v7-so-number"
+PROMPT_VERSION = "v8-bl-number"
 
 # A literal worked example (the canonical sample of the SAP ZFTVIA contract V1, see
 # contract/ZFTVIA_OCR_API_CONTRACT_V1.json) rather than just the abstract JSON schema.
@@ -36,6 +36,7 @@ EXAMPLE_JSON = json.dumps(
             "customer_address": "Harrow, Middlesex, United Kingdom",
             "po_number": "6600128207",
             "SO_number": "4000231178",
+            "BL_number": None,
             "reference_number": "DN 44821",
             "currency": "GBP",
             "subtotal": 1362.70,
@@ -110,8 +111,10 @@ STRICT RULES - follow exactly, this data feeds financial accounting:
 3. MANDATORY, never null: `invoice_number`, `invoice_date`, `vendor_name`, `vendor_tax_id` (VAT number / GSTIN / NIP), `currency`, `document_type` (text), `subtotal`, `tax_amount`, `total_amount` (numbers), and `description`, `amount` for every line item. If one is genuinely not in the text use "" for text or 0 for numbers - never omit the key.
 3a. `invoice_number` is the value printed next to the "Invoice No" / "Invoice Number" / "Inv No" / "Inv #" (or "Credit Note No") label. NEVER use a value labelled Account No, Customer No, Order No, Reference or Page as the invoice number - those go into `additional_fields` (or `po_number`).
 3b. EVERY OTHER field is OPTIONAL and must be `null` when it is not on the document - never "" , "N/A" or 0 for an optional field.
-4. `po_number` must always be present as a key: the customer's purchase order number if printed (also look for "Order No", "PO", "Your Order", "Customer Order"), otherwise null. If several PO numbers are printed, put the first in `po_number` and all of them in `additional_fields` as "Customer Order No". `po_number` is ONLY a number starting with 66 - an order number starting with 40 is a sales order (rule 4a), and any other order/reference number goes in `additional_fields`, never in `po_number`.
+4. `po_number` must always be present as a key: the customer's purchase order number if printed (also look for "Order No", "PO", "Your Order", "Customer Order"), otherwise null. If several PO numbers are printed, put the first in `po_number` and all of them in `additional_fields` as "Customer Order No". Give the PO number exactly as printed (without the label). A value printed only as "Reference" / "Your Reference" goes in `reference_number`, not in `po_number`.
 4a. `SO_number` must always be present as a key: the sales order number if printed (look for "Sales Order", "SO", "S.O. No", "Our Order", "Order Acknowledgement"; it must start with 40), otherwise null. A number not starting with 40 is never the `SO_number`. If several sales order numbers are printed, give all of them separated by ", ". When both a PO and a sales order are printed, fill both `po_number` and `SO_number`.
+4b. `BL_number` must always be present as a key: the Bill of Lading number exactly as printed (look for "Bill of Lading", "B/L", "BL No", "BOL"), otherwise null. If several are printed, give all of them separated by ", ".
+4c. `reference_number`: the value printed next to a "Reference" / "Your Reference" / "Our Ref" / "Customer Ref" label, as printed, otherwise null.
 5. `gl_account`, `cost_center`, `profit_center` on every line item MUST always be null - SAP determines them.
 6. Dates: ISO format YYYY-MM-DD exactly as printed on the document (convert 18/09/2026 or 18.09.2026 to 2026-09-18; British documents use day/month/year). If only a month or a period is printed, use `invoice_period_from` / `invoice_period_to` and leave `due_date` null.
 7. Numbers: plain JSON numbers with a dot decimal separator and no thousands separators or currency symbols (36 558,51 -> 36558.51; £1,635.24 -> 1635.24). Amounts are positive; a credit note is expressed by `document_type` = "CREDIT_NOTE", not by negative amounts. `amount` of a line item is the NET value of that line.

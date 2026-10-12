@@ -233,6 +233,7 @@ def run_pipeline(
         "model_name": settings.ollama_model,
         "prompt_version": PROMPT_VERSION,
         "extraction_source": normalized.extraction_source,
+        "source_text": normalized.source_text,   # to_response reads PO / BL labels from it
         "source_text_hash": source_text_hash,
         "pdf_sha256": hashlib.sha256(pdf_bytes).hexdigest(),
         "sap_reference": sap_reference,

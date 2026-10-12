@@ -7,6 +7,14 @@ verified: ISO dates, ISO currency / country codes, upper-case enumerations, null
 import re
 
 from app.core.constants import CONFIDENCE_FIELDS
+from app.email_ingest.references import (
+    REFERENCE_PO_RE,
+    REFERENCE_SO_RE,
+    find_bl,
+    find_labelled_po,
+    has_bl_label,
+    has_po_label,
+)
 from app.pipeline.grounding import FieldGroundingResult, parse_date
 from app.schemas.envelope import (
     OUTPUT_DATE_FORMAT,
@@ -128,38 +136,35 @@ def normalize_tax_type(value: str | None) -> str:
     return v if v in TAX_TYPES else "OTHER"
 
 
-_SO_PREFIX = "40"   # LT Foods sales orders
-_PO_PREFIX = "66"   # SAP purchase orders
-# A reference token with at least one digit ("4000231178", "PO-4500/22") - not "SO" / "No".
-_REFERENCE_RE = re.compile(r"(?=[A-Za-z0-9\-/.]*\d)[A-Za-z0-9][A-Za-z0-9\-/.]*")
-_SO_LABEL_RE = re.compile(r"sales\s*order|\bs\.?\s?o\b|our\s+order|order\s+ack", re.IGNORECASE)
-_PO_LABEL_RE = re.compile(r"\bp\.?\s?o\b|purchase\s+order|customer\s+order|your\s+order|order\s+no", re.IGNORECASE)
-
-
-def _references(value: str | None) -> list[str]:
-    return _REFERENCE_RE.findall(value or "")
+_REF_LABEL_RE = re.compile(r"\bref", re.IGNORECASE)   # "Reference", "Your Ref", "Customer Ref."
 
 
 def _join_unique(values: list[str]) -> str | None:
-    return ", ".join(dict.fromkeys(v.strip(".-/") for v in values if v.strip(".-/"))) or None
+    return ", ".join(dict.fromkeys(values)) or None
 
 
-def _split_po_so(po_number: str | None, so_number: str | None,
-                 additional_fields: list[AdditionalField]) -> tuple[str | None, str | None]:
-    """Puts each reference in its field by prefix: 66... is a purchase order (po_number), 40...
-    is a sales order (SO_number) - whichever field the LLM put it in; anything else goes in
-    neither. An empty field is filled from a matching labelled additional field
-    ("Sales Order No", "Customer Order No" ...)."""
-    values = _references(po_number) + _references(so_number)
-    po_values = [v for v in values if v.startswith(_PO_PREFIX)]
-    so_values = [v for v in values if v.startswith(_SO_PREFIX)]
-    if not so_values:
-        so_values = [v for f in additional_fields if _SO_LABEL_RE.search(f.field_name)
-                     for v in _references(f.field_value) if v.startswith(_SO_PREFIX)]
-    if not po_values:
-        po_values = [v for f in additional_fields if _PO_LABEL_RE.search(f.field_name)
-                     for v in _references(f.field_value) if v.startswith(_PO_PREFIX)][:1]
-    return _join_unique(po_values), _join_unique(so_values)
+def _determine_po_so_bl(source_text: str, po_number: str | None, so_number: str | None,
+                        bl_number: str | None, reference_number: str | None,
+                        additional_fields: list[AdditionalField]) -> tuple[str | None, str | None, str | None]:
+    """(po_number, SO_number, BL_number), per field:
+    - PO / BL printed on the PDF (PO, Purchase Order, BL, Bill of Lading + a number) -> that
+      number as printed. The number next to the label wins; the LLM's value covers table
+      layouts where it sits in another cell.
+    - Otherwise the Reference: a 66... series is the PO, a 40... series the SO. Any other
+      series leaves PO / SO blank (SAP marks the document failed).
+    A printed sales order the LLM found (40...) is kept as the SO."""
+    references = [reference_number or ""] + [
+        f.field_value or "" for f in additional_fields if _REF_LABEL_RE.search(f.field_name)]
+
+    po = find_labelled_po(source_text) or (po_number if po_number and has_po_label(source_text) else None)
+    if po is None:
+        po = next((m.group() for ref in references for m in REFERENCE_PO_RE.finditer(ref)), None)
+
+    so = _join_unique(REFERENCE_SO_RE.findall(so_number or "")
+                      + [m.group() for ref in references for m in REFERENCE_SO_RE.finditer(ref)])
+
+    bl = find_bl(source_text) or (bl_number if bl_number and has_bl_label(source_text) else None)
+    return po, so, bl
 
 
 def _abs_or_none(value: float | None) -> float | None:
@@ -230,8 +235,9 @@ def build_result(result_id: str, pipeline_result: dict, filename: str | None, em
         for f in extraction.additional_fields
         if f.field_name and f.field_name.strip()
     ]
-    header_data["po_number"], header_data["SO_number"] = _split_po_so(
-        header_data.get("po_number"), header_data.get("SO_number"), additional_fields)
+    header_data["po_number"], header_data["SO_number"], header_data["BL_number"] = _determine_po_so_bl(
+        pipeline_result.get("source_text") or "", header_data.get("po_number"), header_data.get("SO_number"),
+        header_data.get("BL_number"), header_data.get("reference_number"), additional_fields)
     # mandatory string fields keep "" rather than null only when the LLM produced ""
     for name in ("invoice_number", "vendor_name", "currency"):
         if header_data.get(name) is None:
