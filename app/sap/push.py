@@ -3,8 +3,8 @@
 SAP's side is the RFC-enabled function module ZFTVIA_PROCESS_DOCUMENT (function group
 ZFTVIA): it receives the PDF bytes + a source reference, creates the VIA document, stores
 the PDF (Z table / ArchiveLink / DMS as configured there) and later calls this API back
-(POST /api/v1/invoices with the same PDF) - which answers with the already extracted result
-thanks to the sha256 index in results_store, so nothing is OCR'd twice.
+(POST /api/v1/invoices with the same PDF) - which extracts that PDF again (there is no
+re-use of earlier results), so that second result has no email context.
 
 Needs the SAP NetWeaver RFC SDK and `pyrfc` (pip install pyrfc). Both are optional: with
 SAP_PUSH_ENABLED=false (default) this module is never imported at runtime and the SAP side

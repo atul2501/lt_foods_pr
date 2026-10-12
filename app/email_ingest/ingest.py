@@ -164,7 +164,6 @@ def _extract_attachment(key: str, attachment, email: EmailInfo, log) -> bool:
         log.warning("email_customer_unknown", key=key, filename=attachment.filename)
     item.pdf_url = results_store.pdf_url(key)
     results_store.write_pending(key, item.model_dump(mode="json"))
-    results_store.register_hash(pdf_bytes, key)
     results_store.clear_fail(key)
     log.info("pdf_extracted", key=key, filename=attachment.filename, status=result["status"])
     _push_to_sap(key, pdf_bytes, attachment.filename, email, log)

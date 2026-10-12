@@ -30,9 +30,8 @@ DELIVERED_DIR = _root / "delivered"
 FAILED_DIR = _root / "failed"
 PDF_DIR = _root / "files"
 JOBS_DIR = _root / "jobs"
-HASH_DIR = _root / "hashes"      # sha256(pdf) -> result key: the same PDF is never extracted twice
 
-for _dir in (PENDING_DIR, DELIVERED_DIR, FAILED_DIR, PDF_DIR, JOBS_DIR, HASH_DIR):
+for _dir in (PENDING_DIR, DELIVERED_DIR, FAILED_DIR, PDF_DIR, JOBS_DIR):
     _dir.mkdir(parents=True, exist_ok=True)
 
 
@@ -111,7 +110,7 @@ def _delete_old_files() -> None:
     cutoff = time.time() - settings.pdf_retention_days * 86400
     # pending/ is never cleaned: those results haven't been handed out yet. Deleting a
     # delivered result can't cause re-extraction - the email watermark already moved past it.
-    for old in [*PDF_DIR.glob("*.pdf"), *JOBS_DIR.glob("*.json"), *DELIVERED_DIR.glob("*.json"), *HASH_DIR.glob("*.key")]:
+    for old in [*PDF_DIR.glob("*.pdf"), *JOBS_DIR.glob("*.json"), *DELIVERED_DIR.glob("*.json")]:
         try:
             if old.stat().st_mtime < cutoff:
                 old.unlink()
@@ -151,28 +150,6 @@ def job_started_at(job_id: str) -> float | None:
         return (JOBS_DIR / f"{job_id}.processing").stat().st_mtime
     except FileNotFoundError:
         return None
-
-
-def pdf_sha256(content: bytes) -> str:
-    return hashlib.sha256(content).hexdigest()
-
-
-def register_hash(content: bytes, key: str) -> None:
-    """Remembers that this PDF (by content hash) has the result `key` - so when the SAP side
-    uploads a PDF the email poller already extracted (or the same invoice is sent twice), the
-    existing result is reused instead of paying for a second OCR + LLM run."""
-    (HASH_DIR / f"{pdf_sha256(content)}.key").write_text(key, encoding="utf-8")
-
-
-def find_by_hash(content: bytes) -> str | None:
-    """The key of a finished result for this exact PDF content, or None."""
-    try:
-        key = (HASH_DIR / f"{pdf_sha256(content)}.key").read_text(encoding="utf-8").strip()
-    except FileNotFoundError:
-        return None
-    if _KEY_PATTERN.match(key) and get_result(key) is not None:
-        return key
-    return None
 
 
 def pending_count() -> int:

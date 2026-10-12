@@ -30,7 +30,7 @@ email_ingest_main.py  (polls the IMAP inbox every IMAP_POLL_INTERVAL_SECONDS)
      8. (optional)     - push the PDF to SAP by RFC ZFTVIA_PROCESS_DOCUMENT (SAP_PUSH_ENABLED)
 
 FastAPI (uvicorn main:app)
-   POST /api/v1/invoices      - SAP uploads a PDF (raw body) -> 202 + id (same PDF twice = same id)
+   POST /api/v1/invoices      - SAP uploads a PDF (raw body) -> 202 + id (every upload is extracted afresh)
    GET  /api/v1/invoices/{id} - 202 processing | 200 contract JSON
    GET  /api/v1/invoices/new  - returns everything in pending/ and moves it to delivered/
 ```
@@ -178,8 +178,7 @@ Two ways, chosen in `.env`:
    email PDF is extracted the poller calls RFC `ZFTVIA_PROCESS_DOCUMENT` (`app/sap/push.py`,
    needs the SAP NetWeaver RFC SDK and `pip install pyrfc`) with the PDF bytes and the
    message id as source reference. SAP creates the VIA document and later sends the same PDF
-   to `POST /api/v1/invoices`, which answers with the already finished result (sha256
-   dedup). A failed push is logged and the result stays in `pending/` for the pull path.
+   to `POST /api/v1/invoices`, which extracts it again (no re-use of earlier results). A failed push is logged and the result stays in `pending/` for the pull path.
 
 ### Changing the fields
 

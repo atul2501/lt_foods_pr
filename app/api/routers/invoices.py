@@ -145,9 +145,8 @@ async def extract_invoice(request: Request) -> JobAccepted:
     X-SAP-Reference (the VIA document id). A multipart/form-data upload with a "file" field
     (browsers, Swagger UI) is accepted too.
 
-    A PDF whose content was already extracted (same sha256 - e.g. the email poller did it and
-    SAP now uploads the same file) answers with the existing id; its result is available
-    immediately, no second OCR/LLM run."""
+    Every upload is extracted afresh - also a PDF that was uploaded or emailed before - so a
+    re-upload always reflects the current prompt and rules."""
     content_type = request.headers.get("content-type", "")
     filename: str | None = request.headers.get("x-filename")
     sap_reference: str | None = request.headers.get("x-sap-reference")
@@ -173,11 +172,6 @@ async def extract_invoice(request: Request) -> JobAccepted:
         logger.warning("upload_rejected", filename=filename, reason="not_a_pdf")
         raise HTTPException(status_code=400, detail="file is not a valid PDF")
     content = content[content.find(b"%PDF-"):]
-
-    existing = results_store.find_by_hash(content)
-    if existing is not None:
-        logger.info("upload_deduplicated", existing_id=existing, filename=filename, sap_reference=sap_reference)
-        return _job_accepted(existing)
 
     job_id = str(uuid.uuid4())
     results_store.save_pdf(job_id, content)
@@ -206,6 +200,4 @@ def _run_upload_job(job_id: str, content: bytes, filename: str | None, sap_refer
     response.pdf_url = results_store.pdf_url(job_id)
     data = response.model_dump(mode="json")
     results_store.finish_job(job_id, data)
-    if response.status.value != "error":
-        results_store.register_hash(content, job_id)
     logger.info("upload_result", result_id=job_id, status=data["status"], result=data)

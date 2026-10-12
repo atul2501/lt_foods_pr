@@ -251,7 +251,6 @@ def extract_env(monkeypatch):
     monkeypatch.setattr(ingest.results_store, "save_pdf", lambda key, data: None)
     monkeypatch.setattr(ingest.results_store, "pdf_url", lambda key: f"/pdf/{key}")
     monkeypatch.setattr(ingest.results_store, "write_pending", lambda key, data: written.append(data))
-    monkeypatch.setattr(ingest.results_store, "register_hash", lambda data, key: None)
     monkeypatch.setattr(ingest.results_store, "clear_fail", lambda key: None)
     monkeypatch.setattr(ingest, "_push_to_sap", lambda *a: pushed.append(a))
     monkeypatch.setattr(ingest, "run_pipeline", lambda *a, **k: {"status": "success"})
